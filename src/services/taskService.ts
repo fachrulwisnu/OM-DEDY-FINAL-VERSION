@@ -538,10 +538,11 @@ export const taskService = {
     }
 
     const { id: tid, ...taskToInsert } = task;
-    const finalTaskId = (tid && !tid.startsWith('temp-')) ? tid : undefined;
+    // Strip IDs if they are temporary or null
+    const finalTaskId = (tid && typeof tid === 'string' && !tid.startsWith('temp-')) ? tid : undefined;
 
     let finalStatus = (task.status || TaskStatus.TODO).toUpperCase();
-    if (finalStatus === 'DRAFT') finalStatus = 'TODO';
+    if (finalStatus === 'DRAFT' || finalStatus === 'Draft') finalStatus = 'TODO';
 
     const finalPayload: any = {
       ...taskToInsert,
@@ -598,10 +599,10 @@ export const taskService = {
 
       // Strip IDs if they are temporary or null
       const { id: tid, ...taskWithoutId } = task;
-      const finalTaskId = (tid && !tid.startsWith('temp-')) ? tid : undefined;
+      const finalTaskId = (tid && typeof tid === 'string' && !tid.startsWith('temp-')) ? tid : undefined;
 
       let finalStatus = (task.status || TaskStatus.TODO).toUpperCase();
-      if (finalStatus === 'DRAFT') finalStatus = 'TODO';
+      if (finalStatus === 'DRAFT' || finalStatus === 'Draft') finalStatus = 'TODO';
 
       return {
         ...taskWithoutId,
@@ -638,6 +639,45 @@ export const taskService = {
     return data || [];
   },
 
+  async upsertTasks(tasks: Partial<Task>[], actor: string): Promise<Task[]> {
+    if (tasks.length === 0) return [];
+    const { data: { user } } = await supabase.auth.getUser();
+    const actorEmail = user?.email || actor;
+
+    const formattedTasks = tasks.map(task => {
+      const { id: tid, ...taskRest } = task;
+      const finalTaskId = (tid && typeof tid === 'string' && !tid.startsWith('temp-')) ? tid : undefined;
+
+      let finalStatus: string = (task.status || TaskStatus.TODO).toUpperCase();
+      if (finalStatus === 'DRAFT') finalStatus = 'TODO';
+
+      return {
+        ...taskRest,
+        ...(finalTaskId ? { id: finalTaskId } : {}),
+        status: finalStatus as TaskStatus,
+        updated_at: new Date().toISOString(),
+        man_hours: Number(task.man_hours) || 0,
+        start_time: sanitizeDate(task.start_time) || null,
+        end_time: sanitizeDate(task.end_time) || null
+      };
+    });
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .upsert(formattedTasks)
+      .select();
+
+    if (error) throw error;
+
+    await this.logAudit({ 
+      actor, 
+      action: `Batch Upserted ${data.length} Tasks`, 
+      newValue: { count: data.length, project_id: data[0]?.project_id } 
+    });
+
+    return data || [];
+  },
+
   async updateTask(id: string, updates: Partial<Task>, actor: string, options?: { isAutoSync?: boolean }): Promise<Task> {
     const { data: existing, error: fetchError } = await supabase
       .from('tasks')
@@ -647,22 +687,27 @@ export const taskService = {
 
     if (fetchError) throw fetchError;
 
-    const finalUpdates: any = { 
-      id,
+    const updatesToApply: any = { 
       ...updates, 
       updated_at: new Date().toISOString() 
     };
-    if (updates.man_hours !== undefined) finalUpdates.man_hours = Number(updates.man_hours) || 0;
-    if (updates.start_time !== undefined) finalUpdates.start_time = sanitizeDate(updates.start_time) || null;
-    if (updates.end_time !== undefined) finalUpdates.end_time = sanitizeDate(updates.end_time) || null;
-    if (updates.status !== undefined && typeof updates.status === 'string') {
-       finalUpdates.status = updates.status.toUpperCase();
-       if (finalUpdates.status === 'DRAFT') finalUpdates.status = 'TODO';
+
+    // Always ensure status is valid even if not being explicitly updated
+    // to satisfy DB constraints for pre-existing rows
+    if (updates.status !== undefined || (existing.status === null || existing.status === undefined)) {
+      let currentStatus: string = String(updates.status || existing.status || TaskStatus.TODO).toUpperCase();
+      if (currentStatus === 'DRAFT') currentStatus = 'TODO';
+      updatesToApply.status = currentStatus as TaskStatus;
     }
+
+    if (updates.man_hours !== undefined) updatesToApply.man_hours = Number(updates.man_hours) || 0;
+    if (updates.start_time !== undefined) updatesToApply.start_time = sanitizeDate(updates.start_time) || null;
+    if (updates.end_time !== undefined) updatesToApply.end_time = sanitizeDate(updates.end_time) || null;
 
     const { data: updated, error: updateError } = await supabase
       .from('tasks')
-      .upsert(finalUpdates)
+      .update(updatesToApply)
+      .eq('id', id)
       .select()
       .single();
 

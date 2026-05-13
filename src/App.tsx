@@ -302,7 +302,8 @@ const TaskStatusSelector = ({ status, onUpdate, disabled }: { status: any, onUpd
     'ON QUEUE',
     'DONE',
     'ON HOLD',
-    'CANCEL'
+    'CANCEL',
+    'LIVE'
   ];
   if (disabled) return <StatusBadge status={status} />;
   
@@ -314,16 +315,17 @@ const TaskStatusSelector = ({ status, onUpdate, disabled }: { status: any, onUpd
       onChange={(e) => onUpdate(e.target.value)}
       disabled={disabled}
       className={cn(
-        "bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] font-black uppercase outline-none transition-all cursor-pointer",
-        curStatus === 'DONE' ? "text-emerald-400 border-emerald-500/50 bg-emerald-500/20" : 
-        curStatus === 'ON HOLD' ? "text-amber-400 border-amber-500/50 bg-amber-500/20" :
-        curStatus === 'ON QUEUE' ? "text-indigo-400 border-indigo-500/50 bg-indigo-500/20" :
-        curStatus === 'IN PROGRESS' ? "text-blue-400 border-blue-500/50 bg-blue-500/20" :
-        curStatus === 'CANCEL' ? "text-rose-400 border-rose-500/50 bg-rose-500/20" :
-        "text-slate-400 border-slate-500/50 bg-slate-500/20"
+        "bg-[#020437] border border-[var(--border)] rounded px-2 py-1 text-[9px] font-black uppercase outline-none transition-all cursor-pointer",
+        curStatus === 'DONE' ? "text-emerald-400 border-emerald-500/50 hover:bg-emerald-500/30" : 
+        curStatus === 'LIVE' ? "text-cyan-400 border-cyan-500/50 hover:bg-cyan-500/30" : 
+        curStatus === 'ON HOLD' ? "text-amber-400 border-amber-500/50 hover:bg-amber-500/30" :
+        curStatus === 'ON QUEUE' ? "text-indigo-400 border-indigo-500/50 hover:bg-indigo-500/30" :
+        curStatus === 'IN PROGRESS' ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/30" :
+        curStatus === 'CANCEL' ? "text-rose-400 border-rose-500/50 hover:bg-rose-500/30" :
+        "text-slate-400 border-slate-500/50 hover:bg-slate-500/30"
       )}
     >
-      {options.map((opt, i) => <option key={getSafeKey({id: opt}, i, 'task-status-opt')} value={opt}>{opt}</option>)}
+      {options.map((opt, i) => <option key={getSafeKey({id: opt}, i, 'task-status-opt')} value={opt} className="bg-[#020437] text-white">{opt}</option>)}
     </select>
   );
 };
@@ -348,7 +350,7 @@ const ProjectStatusSelector = ({ status, onUpdate, disabled }: { status: any, on
       onChange={(e) => onUpdate(e.target.value)}
       disabled={disabled}
       className={cn(
-        "bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[9px] font-black uppercase outline-none transition-all cursor-pointer",
+        "bg-[#020437] border border-slate-800 rounded px-2 py-1 text-[9px] font-black uppercase outline-none transition-all cursor-pointer",
         status === ProjectStatus.LIVE ? "text-emerald-400" :
         (status === ProjectStatus.HOLD) ? "text-purple-400" :
         (status === ProjectStatus.CANCEL) ? "text-slate-500" :
@@ -356,7 +358,7 @@ const ProjectStatusSelector = ({ status, onUpdate, disabled }: { status: any, on
         "text-indigo-400"
       )}
     >
-      {options.map((opt, i) => <option key={getSafeKey({id: opt}, i, 'project-status-opt')} value={opt}>{opt}</option>)}
+      {options.map((opt, i) => <option key={getSafeKey({id: opt}, i, 'project-status-opt')} value={opt} className="bg-[#020437] text-white">{opt}</option>)}
     </select>
   );
 };
@@ -1115,6 +1117,20 @@ export default function App() {
       })
       .subscribe();
 
+    const historySub = supabase
+      .channel('history_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'history_edit_project' }, (payload) => {
+        setAllHistoryEditLogs(prev => [payload.new as HistoryEditProject, ...prev]);
+      })
+      .subscribe();
+
+    const auditSub = supabase
+      .channel('audit_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_logs' }, (payload) => {
+        setAllAuditLogs(prev => [payload.new as AuditLog, ...prev]);
+      })
+      .subscribe();
+
     const requestChannel = supabase.channel('reschedule_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reschedule_requests' }, () => fetchRescheduleRequests())
       .subscribe();
@@ -1124,6 +1140,8 @@ export default function App() {
     return () => {
       supabase.removeChannel(projectSub);
       supabase.removeChannel(taskSub);
+      supabase.removeChannel(historySub);
+      supabase.removeChannel(auditSub);
       supabase.removeChannel(requestChannel);
     };
   }, [refreshKey, fetchData]);
@@ -1401,7 +1419,20 @@ export default function App() {
           if (finalVal === 'DRAFT') finalVal = 'TODO';
        }
 
-       const updatePayload: any = { [field]: finalVal, updated_at: new Date().toISOString() };
+       // Handle empty string as null for nullable fields (Dev, QA, Feedbacks, etc.)
+       const nullableFields: (keyof Task)[] = [
+         'developer_name', 
+         'qa_name', 
+         'suggestion_fachrul', 
+         'suggestion_barra', 
+         'realized_finish_date',
+         'detail_task'
+       ];
+       if (nullableFields.includes(field) && finalVal === "") {
+         finalVal = null;
+       }
+
+       const updatePayload: any = { [field]: finalVal };
        if (field === 'status') {
           updatePayload.is_manual_override = true;
        }
@@ -2066,10 +2097,10 @@ export default function App() {
                                 <div className={cn(
                                   "px-2 py-1 rounded-md border text-[10px] font-black tracking-widest uppercase transition-colors",
                                   p?.status === ProjectStatus.LIVE ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400" :
-                                  p?.status === ProjectStatus.IN_PROGRESS || p?.status === ProjectStatus.FSD_PROGRESS ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400" :
+                                  (p?.status || "").includes('PROGRESS') ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400" :
                                   "bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-sub)]"
                                 )}>
-                                  {p?.status === ProjectStatus.IN_PROGRESS || p?.status === ProjectStatus.FSD_PROGRESS ? 'FSD ON PROGRESS' : p?.status || 'UNKNOWN'}
+                                  {p?.status || 'UNKNOWN'}
                                 </div>
                               </>
                             );
@@ -2766,11 +2797,12 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
   const [projectDiajukan, setProjectDiajukan] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   
-  const [phases, setPhases] = useState([{ 
+  const [phases, setPhases] = useState<any[]>([{ 
     id: createPersistentId(),
     custom_id: `#PH-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
     title: PHASE_L1_OPTIONS[0], 
     assignee: user?.name || user?.email || '',
+    status: TaskStatus.TODO,
     start_date: '',
     end_date: '',
     duration_hours: 0,
@@ -2781,6 +2813,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
       custom_id: `#TS-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
       title: '', 
       assignee: user?.name || user?.email || '',
+      status: TaskStatus.TODO,
       task_type: 'New Feature' as const,
       components: [] as string[],
       detail_task: '',
@@ -2852,6 +2885,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
       custom_id: `#PH-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
       title: PHASE_L1_OPTIONS[0], 
       assignee: pic || user?.name || user?.email || '',
+      status: TaskStatus.TODO,
       detail_task: '',
       start_date: '',
       end_date: '',
@@ -2862,6 +2896,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
         custom_id: `#TS-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
         title: '', 
         assignee: pic || user?.name || user?.email || '',
+        status: TaskStatus.TODO,
         task_type: 'New Feature' as const,
         components: [] as string[],
         detail_task: '',
@@ -2882,6 +2917,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
         custom_id: `#TS-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
         title: '', 
         assignee: pic || user?.name || user?.email || '',
+        status: TaskStatus.TODO,
         task_type: 'New Feature' as const,
         components: [] as string[],
         detail_task: '',
@@ -3573,6 +3609,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
       custom_id: `#PH-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
       title: PHASE_L1_OPTIONS[0], 
       assignee: pic || user?.name || user?.email || '',
+      status: TaskStatus.TODO,
       start_date: '',
       end_date: '',
       man_hours: 0,
@@ -3589,6 +3626,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
         custom_id: `#TS-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
         title: '', 
         assignee: pic || user?.name || user?.email || '',
+        status: TaskStatus.TODO,
         task_type: 'New Feature',
         components: [],
         detail_task: '',
@@ -4375,14 +4413,11 @@ function PortfolioDashboard({
 
   const mergedProjects = useMemo(() => {
     return safeProjects.map(p => {
-      // Standardize ticket matching (some projects might have ticket_id, others might be new)
-      const mp = masterProjects.find(m => m.ticket_id === p.ticket_id || (p.id && m.id === p.id));
       return {
-        ...p,
-        global_status: mp?.global_status || p.status 
-      } as Project & { global_status?: string };
+        ...p
+      } as Project;
     });
-  }, [safeProjects, masterProjects]);
+  }, [safeProjects]);
 
   const handleExportProjects = () => {
     const exportData = safeProjects.map(p => ({
@@ -4535,12 +4570,6 @@ function PortfolioDashboard({
                 />
                 
                 <div className="flex flex-col gap-1.5 mb-2">
-                  {p.global_status && (
-                    <div className="flex items-center gap-2 bg-blue-50 px-2 py-1 rounded border border-blue-100 mb-1 transition-colors">
-                      <Zap className="w-3 h-3 text-[var(--primary)]" />
-                      <span className="text-[9px] font-black text-[var(--primary)] uppercase tracking-widest italic">{p.global_status}</span>
-                    </div>
-                  )}
                   <div className="flex items-center gap-2 text-[9px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
                     <UserIcon className="w-3 h-3 text-[var(--primary)]" />
                     <span>PIC: <span className="text-[var(--text-primary)] transition-colors font-bold uppercase">{p.pic_name || p.leader_email || 'Unassigned'}</span></span>
@@ -6206,7 +6235,6 @@ function GanttDetailView({
 
   const [activeView, setActiveView] = useState<'INFRASTRUCTURE' | 'SYSTEM_LOG' | 'HISTORY_EDIT'>('INFRASTRUCTURE');
   const [rescheduleLogs, setRescheduleLogs] = useState<ProjectRescheduleLog[]>([]);
-  const [globalStatus, setGlobalStatus] = useState<string>("");
   const scrollRef = React.useRef<HTMLDivElement>(null);
   
   const currentProject = useMemo(() => (projects || []).find((p: any) => p.id === projectId), [projects, projectId]);
@@ -6272,19 +6300,19 @@ function GanttDetailView({
     const syncStatusToDatabase = async () => {
       // 1. Calculate the latest status
       const projectTasks = tasks.filter((t: any) => t.project_id === projectId);
-      const latestStatus = calculateGlobalProjectStatus(projectTasks);
+      const latestStatus = calculateGlobalProjectStatus(projectTasks, currentProject?.status || '');
 
-      // 2. Update local UI state
-      setGlobalStatus(latestStatus); 
-
-      // 3. FORCE SYNC TO SUPABASE (master_projects)
+      // 2. FORCE SYNC TO SUPABASE (master_projects) and local projects state
       // Use ticket_id if available, otherwise fallback to projectId (assuming they refer to same entity in master_projects)
       const syncId = currentProject?.ticket_id || projectId;
       
-      if (syncId && latestStatus) {
+      if (syncId && latestStatus && latestStatus !== currentProject?.status) {
+        // Update local project status first
+        setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: latestStatus as any } : p));
+
         const { error } = await supabase
           .from('master_projects')
-          .update({ global_status: latestStatus }) 
+          .update({ global_status: latestStatus, status: latestStatus }) 
           .eq('ticket_id', syncId);
 
         if (error) {
@@ -6292,13 +6320,16 @@ function GanttDetailView({
         } else {
           console.log("✅ Sync Success: Master Project updated to", latestStatus);
         }
+
+        // Also update the projects table if it differs
+        await supabase.from('projects').update({ status: latestStatus }).eq('id', projectId);
       }
     };
 
-    if (tasks && tasks.length > 0 && projectId) {
+    if (tasks && tasks.length > 0 && projectId && currentProject) {
       syncStatusToDatabase();
     }
-  }, [tasks, projectId, currentProject?.ticket_id]);
+  }, [tasks, projectId, currentProject?.id, currentProject?.ticket_id]);
 
   // If loading, show spinner (simulated or simplified check)
   // We can use the 'tasks' being empty or loading state from props if passed
@@ -6645,13 +6676,13 @@ function GanttDetailView({
                   </div>
 
                   {/* GLOBAL STATUS HEADER DISPLAY */}
-                  {!isGlobalView && globalStatus && (
+                  {!isGlobalView && currentProject?.status && (
                     <div className="flex items-center gap-3 bg-white dark:bg-slate-950/50 px-4 py-2 rounded-xl border border-indigo-100 dark:border-indigo-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(99,102,241,0.1)] animate-pulse transition-colors">
                       <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
                       <div className="flex flex-col">
                         <span className="text-[7px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none mb-0.5">Global Process Status</span>
                         <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none italic">
-                          {globalStatus}
+                          {currentProject.status}
                         </span>
                       </div>
                     </div>
@@ -6830,7 +6861,7 @@ function GanttDetailView({
                           onOpenAudit={handleOpenAudit}
                           onDeleteTask={handleDeleteTask}
                           onAddSubTask={handleAddInlineL2}
-                          disabled={true}
+                          disabled={false}
                           isMobile={isMobile}
                         />
                       </div>
@@ -7708,9 +7739,12 @@ function AuditLogView({ logs, projects, users, isMobile }: { logs: AuditLog[], p
 
 const DeferredTextarea = ({ value, onSave, className, placeholder, disabled, debounceMs }: { value: string, onSave: (v: string) => void, className?: string, placeholder?: string, disabled?: boolean, debounceMs?: number }) => {
   const [local, setLocal] = useState(value);
+  const [isFocused, setIsFocused] = useState(false);
   const timeoutRef = useRef<any>(null);
 
-  useEffect(() => setLocal(value), [value]);
+  useEffect(() => {
+    if (!isFocused) setLocal(value);
+  }, [value, isFocused]);
 
   const handleSave = (val: string) => {
     if (val !== value) onSave(val);
@@ -7721,6 +7755,7 @@ const DeferredTextarea = ({ value, onSave, className, placeholder, disabled, deb
   return (
     <textarea 
       value={local}
+      onFocus={() => setIsFocused(true)}
       onChange={(e) => {
         const val = e.target.value;
         setLocal(val);
@@ -7732,6 +7767,7 @@ const DeferredTextarea = ({ value, onSave, className, placeholder, disabled, deb
         }
       }}
       onBlur={() => { 
+        setIsFocused(false);
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
         handleSave(local); 
       }}
@@ -7741,41 +7777,42 @@ const DeferredTextarea = ({ value, onSave, className, placeholder, disabled, deb
     />
   );
 };
-
 function SystemLogTable({ logs }: { logs: AuditLog[] }) {
   if (!logs || logs.length === 0) {
     return <div className="text-center py-10 text-slate-500 font-bold uppercase text-[10px] tracking-widest border border-dashed border-slate-800 rounded-2xl">No system logs recorded</div>;
   }
   return (
-    <div className="overflow-hidden bg-white rounded-2xl border border-[var(--border-subtle)] shadow-sm">
-      <table className="w-full text-left border-collapse">
-        <thead className="bg-[var(--bg-main)] sticky top-0 z-10 border-b border-[var(--border-subtle)]">
-          <tr>
-            <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest">Action</th>
-            <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest text-center">Auth By</th>
-            <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest text-right">Timestamp</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--border-subtle)]">
-          {logs.map((log) => (
-            <tr key={log.id} className="hover:bg-[var(--bg-main)] transition-colors group">
-              <td className="px-6 py-4">
-                <span className="text-[11px] font-black text-[var(--text-main)] uppercase tracking-tight group-hover:text-[var(--primary)] transition-colors">{log.action || 'INTERNAL OPERATION'}</span>
-              </td>
-              <td className="px-6 py-4 text-center">
-                <span className="text-[10px] font-black text-[var(--success)] bg-[var(--success)]/10 px-3 py-1 rounded-full border border-[var(--success)]/20 uppercase tracking-widest">
-                  {log.actor || 'SYSTEM'}
-                </span>
-              </td>
-              <td className="px-6 py-4 text-right">
-                <span className="text-[10px] font-mono text-[var(--text-sub)] font-bold">
-                  {log.created_at ? format(new Date(log.created_at), 'dd/MM/yy HH:mm') : '-'}
-                </span>
-              </td>
+    <div className="overflow-hidden bg-white dark:bg-[#0b1120] rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm transition-colors">
+      <div className="w-full overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-800">
+            <tr>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Action</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest text-center">Auth By</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest text-right">Timestamp</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+            {logs.map((log) => (
+              <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-slate-900/50 transition-colors group">
+                <td className="px-6 py-4">
+                  <span className="text-[11px] font-black text-gray-700 dark:text-gray-300 uppercase tracking-tight group-hover:text-indigo-500 transition-colors">{log.action || 'INTERNAL OPERATION'}</span>
+                </td>
+                <td className="px-6 py-4 text-center">
+                  <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-100 dark:border-emerald-500/20 uppercase tracking-widest">
+                    {log.actor || 'SYSTEM'}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <span className="text-[10px] font-mono text-gray-400 dark:text-gray-500 font-bold">
+                    {log.created_at ? format(new Date(log.created_at), 'dd/MM/yy HH:mm') : '-'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -7785,47 +7822,47 @@ function HistoryEditTable({ logs, users }: { logs: HistoryEditProject[], users: 
     return <div className="text-center py-10 text-slate-500 font-bold uppercase text-[10px] tracking-widest border border-dashed border-slate-800 rounded-2xl">No user edits recorded</div>;
   }
   return (
-    <div className="overflow-hidden bg-white rounded-2xl border border-[var(--border-subtle)] shadow-sm">
+    <div className="overflow-hidden bg-white dark:bg-[#0b1120] rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm transition-colors">
       <div className="w-full overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[800px]">
-          <thead className="bg-[var(--bg-main)] sticky top-0 z-10 border-b border-[var(--border-subtle)]">
+          <thead className="bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-800">
             <tr>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest w-[150px]">PIC Name</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest text-center w-[120px]">Date</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest w-[150px]">Field Name</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest">Before</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest">After</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest w-[150px]">PIC Name</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest text-center w-[120px]">Date</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest w-[150px]">Field Name</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Before</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">After</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[var(--border-subtle)]">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {logs.map((log) => {
               const actorName = users.find(u => u.email === log.pic_name)?.name || log.pic_name;
               
               return (
-                <tr key={log.id} className="hover:bg-[var(--bg-main)] transition-colors group">
+                <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-slate-900/50 transition-colors group">
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded bg-[var(--primary)]/10 flex items-center justify-center border border-[var(--primary)]/20">
-                        <UserIcon className="w-3 h-3 text-[var(--primary)]" />
+                      <div className="w-6 h-6 rounded bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center border border-indigo-100 dark:border-indigo-500/20">
+                        <UserIcon className="w-3 h-3 text-indigo-500" />
                       </div>
-                      <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">{actorName}</span>
+                      <span className="text-[10px] font-black text-gray-700 dark:text-gray-300 uppercase tracking-tight">{actorName}</span>
                     </div>
                   </td>
                   <td className="px-6 py-3 text-center">
-                    <span className="text-[9px] font-mono text-[var(--text-sub)] font-bold">
+                    <span className="text-[9px] font-mono text-gray-400 dark:text-gray-500 font-bold">
                       {log.created_at ? format(new Date(log.created_at), 'dd/MM/yy') : '-'}
                     </span>
                   </td>
                   <td className="px-6 py-3">
-                    <span className="text-[10px] font-bold text-[var(--text-sub)] uppercase tracking-tight">{log.field_name}</span>
+                    <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-tight">{log.field_name}</span>
                   </td>
                   <td className="px-6 py-3">
-                    <div className="max-w-[200px] truncate text-[10px] text-[var(--danger)]/60 line-through italic">
+                    <div className="max-w-[200px] truncate text-[10px] text-rose-500/60 line-through italic">
                        {log.before_value}
                     </div>
                   </td>
                   <td className="px-6 py-3">
-                    <div className="max-w-[200px] truncate text-[10px] text-[var(--success)] font-bold italic">
+                    <div className="max-w-[200px] truncate text-[10px] text-emerald-500 font-bold italic">
                        {log.after_value}
                     </div>
                   </td>
@@ -7850,52 +7887,52 @@ function AuditLogTable({ logs }: { logs: ProjectRescheduleLog[] }) {
   }
 
   return (
-    <div className="overflow-hidden border border-[var(--border-subtle)] rounded-2xl bg-white shadow-sm">
+    <div className="overflow-hidden bg-white dark:bg-[#0b1120] rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm transition-colors">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[800px]">
-          <thead className="bg-[var(--bg-main)] border-b border-[var(--border-subtle)]">
+          <thead className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800">
             <tr>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest">Timestamp</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest">Authorized By</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest text-center">Previous Timeline</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest text-center">Target Timeline</th>
-              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-sub)] uppercase tracking-widest">Reason / Justification</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Timestamp</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Authorized By</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest text-center">Previous Timeline</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest text-center">Target Timeline</th>
+              <th className="px-6 py-4 text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Reason / Justification</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {logs.map((log, i) => (
-              <tr key={getSafeKey(log, i, 'resched-log')} className="hover:bg-white/[0.02] transition-colors">
+              <tr key={getSafeKey(log, i, 'resched-log')} className="hover:bg-gray-50 dark:hover:bg-slate-900/50 transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex flex-col">
-                    <span className="text-xs text-slate-200 font-mono italic">{format(new Date(log.created_at), 'MMM dd, yyyy')}</span>
-                    <span className="text-[10px] text-slate-600 font-bold">{format(new Date(log.created_at), 'HH:mm:ss')}</span>
+                    <span className="text-xs text-gray-600 dark:text-gray-200 font-mono italic">{format(new Date(log.created_at), 'MMM dd, yyyy')}</span>
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 font-bold">{format(new Date(log.created_at), 'HH:mm:ss')}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-[10px] font-black text-indigo-400">
+                    <div className="w-6 h-6 rounded-full bg-indigo-50 dark:bg-indigo-500/20 border border-indigo-100 dark:border-indigo-500/30 flex items-center justify-center text-[10px] font-black text-indigo-500 dark:text-indigo-400">
                       {log.changed_by?.charAt(0) || 'A'}
                     </div>
-                    <span className="text-xs font-bold text-slate-300">{log.changed_by}</span>
+                    <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{log.changed_by}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4">
                    <div className="flex flex-col items-center gap-1 opacity-50">
-                      <span className="text-[9px] text-slate-400 font-mono">{log.old_start_date}</span>
-                      <ArrowDown className="w-3 h-3 text-slate-600" />
-                      <span className="text-[9px] text-slate-400 font-mono">{log.old_end_date}</span>
+                      <span className="text-[9px] text-gray-400 dark:text-gray-500 font-mono">{log.old_start_date}</span>
+                      <ArrowDown className="w-3 h-3 text-gray-300 dark:text-gray-600" />
+                      <span className="text-[9px] text-gray-400 dark:text-gray-500 font-mono">{log.old_end_date}</span>
                    </div>
                 </td>
                 <td className="px-6 py-4">
                    <div className="flex flex-col items-center gap-1">
-                      <span className="text-[9px] text-emerald-400 font-black font-mono">{log.new_start_date}</span>
+                      <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-black font-mono">{log.new_start_date}</span>
                       <ArrowDown className="w-3 h-3 text-indigo-500" />
-                      <span className="text-[9px] text-emerald-400 font-black font-mono">{log.new_end_date}</span>
+                      <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-black font-mono">{log.new_end_date}</span>
                    </div>
                 </td>
                 <td className="px-6 py-4">
-                  <div className="p-3 bg-slate-950/50 rounded-xl border border-white/5 max-w-md">
-                     <p className="text-xs text-slate-400 leading-relaxed italic">"{log.reason}"</p>
+                  <div className="p-3 bg-gray-50 dark:bg-slate-950/50 rounded-xl border border-gray-100 dark:border-white/5 max-w-md">
+                     <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed italic">"{log.reason}"</p>
                   </div>
                 </td>
               </tr>

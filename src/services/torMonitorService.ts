@@ -66,39 +66,45 @@ export const checkPhaseSequencing = (tasks: Task[], currentTask: Task): boolean 
   return true;
 };
 
-// Fungsi ini menerima daftar seluruh task (L1/L2) dari sebuah project
-export function calculateGlobalProjectStatus(tasks: Task[]) {
-  if (!tasks || tasks.length === 0) return "To Do";
+// Fungsi ini menerima daftar seluruh task (L1/L2) dari sebuah project dan status saat ini
+export function calculateGlobalProjectStatus(tasks: Task[], currentStatus: string) {
+  // TASK 1: AUTO-SYNC LOGIC WITH "OVERRIDE LOCK"
+  // Lock Logic: If currentProjectStatus is 'HOLD', 'CANCEL', or 'PROJECT LATE', DO NOT auto-calculate.
+  const lockedStatuses = [
+    ProjectStatus.HOLD as string,
+    ProjectStatus.CANCEL as string,
+    ProjectStatus.LATE as string
+  ];
 
-  // 1. HELPER: Case-insensitive check for completed statuses
-  const isCompleted = (task: Task) => {
-    const status = (task.current_status || task.status || '').toUpperCase();
-    return !!task.realized_finish_date || status.includes('DONE') || status.includes('OVERDUE') || status.includes('EARLY');
-  };
+  if (lockedStatuses.includes(currentStatus)) {
+    return currentStatus; // Preserve manual override
+  }
 
-  // 2. HELPER: Case-insensitive phase matching
-  const getTasksByPhase = (phaseName: string) => {
-    return tasks.filter(t => (t.phase_type || t.title || '').toUpperCase().includes(phaseName.toUpperCase()));
-  };
+  const l1Tasks = tasks.filter(t => !t.parent_id);
+  if (l1Tasks.length === 0) return ProjectStatus.TODO;
 
-  const fsdTasks = getTasksByPhase('FSD');
-  const devTasks = getTasksByPhase('DEV');
-  const sitTasks = getTasksByPhase('SIT');
-  const uatTasks = getTasksByPhase('UAT');
+  // Auto Logic (If not locked):
+  // Find active L1 task (status === 'IN PROGRESS').
+  const activeL1 = l1Tasks.find(t => t.status === TaskStatus.IN_PROGRESS);
 
-  // --- DEBUG LOGGER ---
-  console.log("--- STATUS CHECK ---");
-  console.log("FSD Completed?", fsdTasks.length > 0 ? fsdTasks.every(isCompleted) : "No Tasks");
-  console.log("DEV Completed?", devTasks.length > 0 ? devTasks.every(isCompleted) : "No Tasks");
+  if (activeL1) {
+    const title = (activeL1.title || '').toUpperCase();
+    if (title.includes('FSD')) return ProjectStatus.FSD_PROGRESS;
+    if (title.includes('DEV')) return ProjectStatus.DEV_PROGRESS;
+    if (title.includes('SIT')) return ProjectStatus.SIT_PROGRESS;
+    if (title.includes('UAT')) return ProjectStatus.UAT_PROGRESS;
+  }
 
-  // 3. SEQUENTIAL EVALUATION LOGIC
-  if (fsdTasks.length > 0 && !fsdTasks.every(isCompleted)) return "FSD On Progress";
-  if (devTasks.length > 0 && !devTasks.every(isCompleted)) return "Development On Progress";
-  if (sitTasks.length > 0 && !sitTasks.every(isCompleted)) return "SIT On Progress";
-  if (uatTasks.length > 0 && !uatTasks.every(isCompleted)) return "UAT On Progress";
-  if (tasks.length > 0 && tasks.every(isCompleted)) return "LIVE";
+  // If all L1 tasks 'DONE' -> return 'LIVE'
+  const allDone = l1Tasks.every(t => t.status === TaskStatus.DONE);
+  if (allDone && l1Tasks.length > 0) return ProjectStatus.LIVE;
 
-  return "To Do";
+  // If all L1 tasks 'TODO' -> return 'TODO'
+  const allTodo = l1Tasks.every(t => t.status === TaskStatus.TODO);
+  if (allTodo && l1Tasks.length > 0) return ProjectStatus.TODO;
+
+  // Default: return current status if no auto-sync condition is met
+  return currentStatus;
 }
 
 export const torAutoSync = async (projectId: string, tasks: Task[], projects: Project[], actor: string) => {
@@ -201,7 +207,7 @@ export const torAutoSync = async (projectId: string, tasks: Task[], projects: Pr
   }
 
   // Calculate new Global Status using common logic
-  const newGlobalStatus = calculateGlobalProjectStatus(projectTasks);
+  const newGlobalStatus = calculateGlobalProjectStatus(projectTasks, project.status);
 
   if (newGlobalStatus && project.status !== newGlobalStatus) {
     // 1. Update projects table

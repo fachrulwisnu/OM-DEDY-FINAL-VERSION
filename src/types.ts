@@ -4,7 +4,8 @@ export enum TaskStatus {
   ON_HOLD = 'ON HOLD',
   ON_QUEUE = 'ON QUEUE',
   DONE = 'DONE',
-  CANCEL = 'CANCEL'
+  CANCEL = 'CANCEL',
+  LIVE = 'LIVE'
 }
 
 export type Status = TaskStatus; 
