@@ -1580,7 +1580,7 @@ export default function App() {
     if (!currentSelected) return;
 
     const projectTasks = tasks.filter(t => t.project_id === selectedProjectId);
-    const newStatus = calculateGlobalProjectStatus(projectTasks);
+    const newStatus = calculateGlobalProjectStatus(projectTasks, currentSelected.status || '');
     
     if (newStatus && currentSelected.status !== newStatus) {
       setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, status: newStatus as any } : p));

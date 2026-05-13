@@ -82,7 +82,7 @@ export function TorMonitor({ user }: { user: any }) {
     const master = masterProjects.find(m => m.ticket_id === p.ticket_id);
     if (master && master.status) return master.status;
 
-    return calculateGlobalProjectStatus(pTasks);
+    return calculateGlobalProjectStatus(pTasks, p.status || '');
   };
 
   const getProjectProgress = (pTasks: Task[]) => {
