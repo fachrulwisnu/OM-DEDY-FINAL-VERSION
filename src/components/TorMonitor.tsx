@@ -261,7 +261,7 @@ export function TorMonitor({ user }: { user: any }) {
                   </div>
                 </div>
                 <h3 className="text-xl font-black text-[var(--text-main)] tracking-tight uppercase leading-tight group-hover:text-[var(--accent)] transition-colors">
-                  {project.project_name}
+                  {project.project_name || "Loading Project..."}
                 </h3>
               </div>
 

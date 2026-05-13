@@ -142,7 +142,7 @@ export default function KaldevView() {
 
               {/* Title & Info */}
               <h3 className="text-sm font-bold text-[var(--text-main)] group-hover:text-[var(--accent)] transition-colors line-clamp-2 min-h-[2.5rem] mb-4">
-                {project.project_name}
+                {project.project_name || "Loading Project..."}
               </h3>
 
               {/* Progress Bar */}

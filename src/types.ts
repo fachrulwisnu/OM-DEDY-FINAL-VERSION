@@ -3,7 +3,8 @@ export enum TaskStatus {
   IN_PROGRESS = 'IN PROGRESS',
   ON_HOLD = 'ON HOLD',
   ON_QUEUE = 'ON QUEUE',
-  DONE = 'DONE'
+  DONE = 'DONE',
+  CANCEL = 'CANCEL'
 }
 
 export type Status = TaskStatus; 

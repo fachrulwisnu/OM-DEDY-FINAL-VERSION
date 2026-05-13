@@ -165,7 +165,7 @@ export default function KanbanNotionAPI() {
                   {statusProjects.length > 0 ? (
                     statusProjects.map((project) => {
                       const raw = project.raw_data || {};
-                      const projectName = raw["Project Name"] || project.project_name || "Unknown Project";
+                      const projectName = raw["Project Name"] || project.project_name || "Loading Project...";
                       const ticketId = raw["Ticket"] || project.ticket_id || "-";
                       const picName = raw["PIC Name"] || "-";
                       const ownerName = raw["Owner Name"] || "-";

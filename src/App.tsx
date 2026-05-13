@@ -261,23 +261,20 @@ const StatusBadge = ({ status, type = 'task' }: { status: string, type?: 'projec
   const isCancel = status.toLowerCase() === 'cancel' || status.toLowerCase() === 'canceled';
 
   const styles: Record<string, string> = {
-    // Task Status (Antigravity Soft Ghost Style)
-    'TODO': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
-    'IN PROGRESS': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    'ON HOLD': 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-    'ON QUEUE': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
-    'DONE': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+    // Task Status (Task 3 Unification)
+    'TODO': 'bg-slate-500/20 text-slate-400 border-slate-500/50',
+    'IN PROGRESS': 'bg-blue-500/20 text-blue-400 border-blue-500/50',
+    'ON QUEUE': 'bg-indigo-500/20 text-indigo-400 border-indigo-500/50',
+    'DONE': 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50',
+    'ON HOLD': 'bg-amber-500/20 text-amber-400 border-amber-500/50',
+    'CANCEL': 'bg-rose-500/20 text-rose-400 border-rose-500/50',
     
     // Project Status (Mapping to Uppercase Enums)
-    'TODO': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
-    'IN PROGRESS': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
     'FSD ON PROGRESS': 'bg-blue-500/10 text-blue-400 border-blue-100',
     'DEVELOPMENT ON PROGRESS': 'bg-blue-500/10 text-blue-400 border-blue-100',
     'SIT ON PROGRESS': 'bg-indigo-500/10 text-indigo-400 border-indigo-100',
     'UAT ON PROGRESS': 'bg-violet-500/10 text-violet-400 border-violet-100',
     'LIVE': 'bg-emerald-500/10 text-emerald-500 border-emerald-100',
-    'HOLD': 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-    'CANCEL': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
     'PROJECT LATE': 'bg-rose-500/10 text-rose-500 border-rose-500',
   };
 
@@ -300,25 +297,30 @@ const StatusBadge = ({ status, type = 'task' }: { status: string, type?: 'projec
 
 const TaskStatusSelector = ({ status, onUpdate, disabled }: { status: any, onUpdate: (s: any) => void, disabled?: boolean }) => {
   const options = [
-    TaskStatus.TODO,
-    TaskStatus.IN_PROGRESS,
-    TaskStatus.ON_HOLD,
-    TaskStatus.ON_QUEUE,
-    TaskStatus.DONE
+    'TODO',
+    'IN PROGRESS',
+    'ON QUEUE',
+    'DONE',
+    'ON HOLD',
+    'CANCEL'
   ];
   if (disabled) return <StatusBadge status={status} />;
+  
+  const curStatus = status?.toUpperCase() || 'TODO';
+
   return (
     <select 
-      value={status || TaskStatus.TODO}
+      value={curStatus}
       onChange={(e) => onUpdate(e.target.value)}
       disabled={disabled}
       className={cn(
         "bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] font-black uppercase outline-none transition-all cursor-pointer",
-        status === TaskStatus.DONE ? "text-emerald-400" : 
-        (status === TaskStatus.ON_HOLD) ? "text-purple-400" :
-        (status === TaskStatus.ON_QUEUE) ? "text-amber-400" :
-        (status === TaskStatus.IN_PROGRESS) ? "text-blue-400" :
-        "text-[var(--text-sub)]"
+        curStatus === 'DONE' ? "text-emerald-400 border-emerald-500/50 bg-emerald-500/20" : 
+        curStatus === 'ON HOLD' ? "text-amber-400 border-amber-500/50 bg-amber-500/20" :
+        curStatus === 'ON QUEUE' ? "text-indigo-400 border-indigo-500/50 bg-indigo-500/20" :
+        curStatus === 'IN PROGRESS' ? "text-blue-400 border-blue-500/50 bg-blue-500/20" :
+        curStatus === 'CANCEL' ? "text-rose-400 border-rose-500/50 bg-rose-500/20" :
+        "text-slate-400 border-slate-500/50 bg-slate-500/20"
       )}
     >
       {options.map((opt, i) => <option key={getSafeKey({id: opt}, i, 'task-status-opt')} value={opt}>{opt}</option>)}
@@ -536,7 +538,7 @@ const SuccessNotification = ({ show, message, onClose }: { show: boolean, messag
 
 // --- Components ---
 
-function EditableInput({ value, onSave, className, placeholder, type = 'text', min, max, disabled }: { 
+function EditableInput({ value, onSave, className, placeholder, type = 'text', min, max, disabled, debounceMs }: { 
   value: string | number, 
   onSave: (val: any) => void, 
   className?: string, 
@@ -544,25 +546,32 @@ function EditableInput({ value, onSave, className, placeholder, type = 'text', m
   type?: 'text' | 'number',
   min?: string | number,
   max?: string | number,
-  disabled?: boolean
+  disabled?: boolean,
+  debounceMs?: number
 }) {
   const [localValue, setLocalValue] = useState(value);
+  const timeoutRef = useRef<any>(null);
 
   useEffect(() => {
     setLocalValue(value);
   }, [value]);
 
+  const saveValue = (val: any) => {
+    if (type === 'number') {
+      let finalVal = parseFloat(String(val)) || 0;
+      if (min !== undefined) finalVal = Math.max(Number(min), finalVal);
+      if (max !== undefined) finalVal = Math.min(Number(max), finalVal);
+      onSave(finalVal);
+    } else {
+      onSave(val);
+    }
+  };
+
   const handleBlur = () => {
     if (disabled) return;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (localValue !== value) {
-      if (type === 'number') {
-        let val = parseFloat(String(localValue)) || 0;
-        if (min !== undefined) val = Math.max(Number(min), val);
-        if (max !== undefined) val = Math.min(Number(max), val);
-        onSave(val);
-      } else {
-        onSave(localValue);
-      }
+      saveValue(localValue);
     }
   };
 
@@ -573,6 +582,7 @@ function EditableInput({ value, onSave, className, placeholder, type = 'text', m
     }
     if (e.key === 'Escape') {
       setLocalValue(value);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       (e.target as HTMLInputElement).blur();
     }
   };
@@ -588,11 +598,13 @@ function EditableInput({ value, onSave, className, placeholder, type = 'text', m
       value={localValue}
       onChange={(e) => {
         const val = e.target.value;
-        if (type === 'number' && min !== undefined) {
-           const n = parseInt(val) || 0;
-           setLocalValue(Math.max(Number(min), n));
-        } else {
-           setLocalValue(val);
+        setLocalValue(val);
+
+        if (debounceMs) {
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => {
+            saveValue(val);
+          }, debounceMs);
         }
       }}
       onBlur={handleBlur}
@@ -1360,15 +1372,6 @@ export default function App() {
           }
        }
 
-       if (field === 'realized_finish_date' && sanitizedVal) {
-          const checkStart = task.start_time;
-          if (checkStart && sanitizedVal < checkStart) {
-             const dateStr = format(new Date(checkStart), 'dd/MM/yyyy');
-             alert(`VALIDATION ERROR: Realized Finish Date tidak boleh lebih kecil dari Plan Start Date (${dateStr}).`);
-             return;
-          }
-       }
-
        if (field === 'status' && sanitizedVal === TaskStatus.IN_PROGRESS) {
           const projectTasks = tasks.filter(t => t.project_id === task.project_id);
           const l1Phases = projectTasks.filter(t => !t.parent_id).sort((a,b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
@@ -1392,7 +1395,13 @@ export default function App() {
           }
        }
 
-       const updatePayload: any = { [field]: sanitizedVal, updated_at: new Date().toISOString() };
+       let finalVal = sanitizedVal;
+       if (field === 'status' && typeof sanitizedVal === 'string') {
+          finalVal = sanitizedVal.toUpperCase();
+          if (finalVal === 'DRAFT') finalVal = 'TODO';
+       }
+
+       const updatePayload: any = { [field]: finalVal, updated_at: new Date().toISOString() };
        if (field === 'status') {
           updatePayload.is_manual_override = true;
        }
@@ -5992,7 +6001,7 @@ function PersonelManagement({ users, projects, currentUser, onRefresh, isAdmin, 
                       {projects.filter(p => true).map((p, i) => (
                         <div key={getSafeKey(p, i, 'pic-project')} className="bg-[var(--bg-page)] border border-[var(--border)] rounded-xl p-4 flex items-center justify-between hover:border-[var(--accent)]/50 transition-all group">
                             <div>
-                              <p className="text-xs font-bold text-[var(--text-main)] uppercase">{p.project_name}</p>
+                              <p className="text-xs font-bold text-[var(--text-main)] uppercase">{p.project_name || "Loading Project..."}</p>
                               <p className="text-[9px] text-[var(--text-sub)] font-bold uppercase tracking-tighter mt-1">Status: <span className="text-[var(--accent)]">{p.status}</span></p>
                             </div>
                             <button className="p-2 bg-[var(--bg-card)] rounded-lg text-[var(--text-sub)] hover:text-[var(--text-main)] transition-opacity opacity-0 group-hover:opacity-100">
@@ -6111,7 +6120,7 @@ function KanbanView({ projects, tasks, onOpenGantt, onUpdateProject }: { project
                       >
                         <div className="relative z-10">
                           <div className="flex justify-between items-start gap-2 mb-2">
-                            <h4 className="text-xs font-black text-[var(--text-main)] italic uppercase tracking-tighter transition-colors">{p.project_name}</h4>
+                            <h4 className="text-xs font-black text-[var(--text-main)] italic uppercase tracking-tighter transition-colors">{p.project_name || "Loading Project..."}</h4>
                             {isLate && (
                               <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[7px] font-black uppercase tracking-widest rounded animate-pulse">LATE</span>
                             )}
@@ -7697,17 +7706,35 @@ function AuditLogView({ logs, projects, users, isMobile }: { logs: AuditLog[], p
   );
 }
 
-const DeferredTextarea = ({ value, onSave, className, placeholder, disabled }: { value: string, onSave: (v: string) => void, className?: string, placeholder?: string, disabled?: boolean }) => {
+const DeferredTextarea = ({ value, onSave, className, placeholder, disabled, debounceMs }: { value: string, onSave: (v: string) => void, className?: string, placeholder?: string, disabled?: boolean, debounceMs?: number }) => {
   const [local, setLocal] = useState(value);
+  const timeoutRef = useRef<any>(null);
+
   useEffect(() => setLocal(value), [value]);
+
+  const handleSave = (val: string) => {
+    if (val !== value) onSave(val);
+  };
 
   if (disabled) return <div className={cn(className, "opacity-70 text-[8px] overflow-hidden")}>{value || placeholder}</div>;
 
   return (
     <textarea 
       value={local}
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={() => { if (local !== value) onSave(local); }}
+      onChange={(e) => {
+        const val = e.target.value;
+        setLocal(val);
+        if (debounceMs) {
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => {
+            handleSave(val);
+          }, debounceMs);
+        }
+      }}
+      onBlur={() => { 
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        handleSave(local); 
+      }}
       className={className}
       placeholder={placeholder}
       disabled={disabled}
@@ -8079,16 +8106,8 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
           <td className="px-4 py-4 bg-[var(--accent)]/5" onClick={e => e.stopPropagation()}>
             <CustomDatePicker 
               selectedDate={task.realized_finish_date ? format(new Date(task.realized_finish_date), 'yyyy-MM-dd') : ''}
-              minDate={task.start_time ? new Date(task.start_time) : undefined}
               onChange={(date) => {
                 const val = date ? new Date(`${date}T17:00:00`).toISOString() : null;
-                
-                // Manual validation check for older browsers or manual typing
-                if (val && task.start_time && new Date(val) < new Date(task.start_time)) {
-                   alert(`VALIDATION ERROR: Realized Finish tidak boleh mendahului Plan Start (${format(new Date(task.start_time), 'dd/MM/yyyy')})`);
-                   return;
-                }
-                
                 onUpdateTask(task.id, 'realized_finish_date', val);
               }}
               className="bg-transparent border-none text-[10px] text-[var(--text-main)] font-mono text-center w-full outline-none focus:ring-1 focus:ring-[var(--accent)] rounded"
@@ -8102,6 +8121,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               <EditableInput 
                 value={task.developer_name || ''} 
                 onSave={(v) => onUpdateTask(task.id, 'developer_name', v)}
+                debounceMs={800}
                 className="bg-[var(--bg-page)] border border-[var(--border)] text-[10px] px-1.5 py-1 rounded text-[var(--accent)] text-center hover:border-[var(--accent)] transition-all font-mono w-full"
                 placeholder="Dev"
                 disabled={disabled}
@@ -8115,6 +8135,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               <EditableInput 
                 value={task.qa_name || ''} 
                 onSave={(v) => onUpdateTask(task.id, 'qa_name', v)}
+                debounceMs={800}
                 className="bg-[var(--bg-page)] border border-[var(--border)] text-[10px] px-1.5 py-1 rounded text-purple-400 text-center hover:border-purple-500 transition-all font-mono w-full"
                 placeholder="QA"
                 disabled={disabled}
@@ -8182,11 +8203,12 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
           <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
              <div className="flex items-center gap-1.5 px-2 py-1.5 bg-[var(--bg-page)]/50 rounded-lg border border-[var(--border)] group-hover:border-[var(--accent)]/30 transition-colors">
                 <div className="flex flex-col gap-0.5 min-w-[50px]">
-                  <ApprovalBadge value={task.approval_fachrul} label="Fachrul" onUpdate={(v) => onUpdateTask(task.id, 'approval_fachrul', v)} disabled={disabled} />
+                   <ApprovalBadge value={task.approval_fachrul} label="Fachrul" onUpdate={(v) => onUpdateTask(task.id, 'approval_fachrul', v)} disabled={disabled} />
                 </div>
                 <DeferredTextarea 
                    value={task.suggestion_fachrul || ''}
                    onSave={(v) => onUpdateTask(task.id, 'suggestion_fachrul', v)}
+                   debounceMs={500}
                    className="bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] text-[var(--text-main)] focus:ring-1 focus:ring-[var(--accent)] outline-none w-full min-h-[32px] max-h-[32px] resize-none scrollbar-hide font-medium"
                    placeholder="..."
                    disabled={disabled}
@@ -8198,11 +8220,12 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
           <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
              <div className="flex items-center gap-1.5 px-2 py-1.5 bg-[var(--bg-page)]/50 rounded-lg border border-[var(--border)] group-hover:border-[var(--accent)]/30 transition-colors">
                 <div className="flex flex-col gap-0.5 min-w-[50px]">
-                  <ApprovalBadge value={task.approval_barra} label="Barra" onUpdate={(v) => onUpdateTask(task.id, 'approval_barra', v)} disabled={disabled} />
+                   <ApprovalBadge value={task.approval_barra} label="Barra" onUpdate={(v) => onUpdateTask(task.id, 'approval_barra', v)} disabled={disabled} />
                 </div>
                 <DeferredTextarea 
                    value={task.suggestion_barra || ''}
                    onSave={(v) => onUpdateTask(task.id, 'suggestion_barra', v)}
+                   debounceMs={500}
                    className="bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] text-[var(--text-main)] focus:ring-1 focus:ring-[var(--accent)] outline-none w-full min-h-[32px] max-h-[32px] resize-none scrollbar-hide font-medium"
                    placeholder="..."
                    disabled={disabled}

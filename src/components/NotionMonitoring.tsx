@@ -457,7 +457,7 @@ export function NotionMonitoring() {
                                 setIsEditing(false);
                               }}
                             >
-                              <h4 className="text-white font-bold text-xs leading-tight group-hover:text-indigo-400 transition-colors line-clamp-2 pr-2">{project.project_name}</h4>
+                              <h4 className="text-white font-bold text-xs leading-tight group-hover:text-indigo-400 transition-colors line-clamp-2 pr-2">{project.project_name || "Loading Project..."}</h4>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <button 

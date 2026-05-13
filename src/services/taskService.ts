@@ -537,10 +537,15 @@ export const taskService = {
       }
     }
 
-    const { id: _, ...taskToInsert } = task;
+    const { id: tid, ...taskToInsert } = task;
+    const finalTaskId = (tid && !tid.startsWith('temp-')) ? tid : undefined;
+
+    let finalStatus = (task.status || TaskStatus.TODO).toUpperCase();
+    if (finalStatus === 'DRAFT') finalStatus = 'TODO';
 
     const finalPayload: any = {
       ...taskToInsert,
+      ...(finalTaskId ? { id: finalTaskId } : {}),
       custom_id: task.custom_id || `#TS-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
       man_hours: Number(task.man_hours) || 0,
       start_time: sanitizeDate(task.start_time),
@@ -551,7 +556,7 @@ export const taskService = {
       start_minute: parseInt(String(task.start_minute ?? 0)) || 0,
       duration_hours: parseInt(String(task.duration_hours ?? 0)) || 0,
       duration_minutes: parseInt(String(task.duration_minutes ?? 0)) || 0,
-      status: (task.status || TaskStatus.TODO).toUpperCase(),
+      status: finalStatus,
       updated_at: new Date().toISOString()
     };
 
@@ -595,6 +600,9 @@ export const taskService = {
       const { id: tid, ...taskWithoutId } = task;
       const finalTaskId = (tid && !tid.startsWith('temp-')) ? tid : undefined;
 
+      let finalStatus = (task.status || TaskStatus.TODO).toUpperCase();
+      if (finalStatus === 'DRAFT') finalStatus = 'TODO';
+
       return {
         ...taskWithoutId,
         ...(finalTaskId ? { id: finalTaskId } : {}),
@@ -608,7 +616,7 @@ export const taskService = {
         start_minute: parseInt(String(task.start_minute ?? 0)) || 0,
         duration_hours: parseInt(String(task.duration_hours ?? 0)) || 0,
         duration_minutes: parseInt(String(task.duration_minutes ?? 0)) || 0,
-        status: (task.status || TaskStatus.TODO).toUpperCase(),
+        status: finalStatus,
         updated_at: new Date().toISOString()
       };
     });
@@ -647,6 +655,10 @@ export const taskService = {
     if (updates.man_hours !== undefined) finalUpdates.man_hours = Number(updates.man_hours) || 0;
     if (updates.start_time !== undefined) finalUpdates.start_time = sanitizeDate(updates.start_time) || null;
     if (updates.end_time !== undefined) finalUpdates.end_time = sanitizeDate(updates.end_time) || null;
+    if (updates.status !== undefined && typeof updates.status === 'string') {
+       finalUpdates.status = updates.status.toUpperCase();
+       if (finalUpdates.status === 'DRAFT') finalUpdates.status = 'TODO';
+    }
 
     const { data: updated, error: updateError } = await supabase
       .from('tasks')
