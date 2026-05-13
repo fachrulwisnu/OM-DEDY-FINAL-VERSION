@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    /* Antigravity Light Palette */
+    --bg-page: #F4F7FE;       /* Soft bluish white */
+    --bg-card: #FFFFFF;
+    --bg-sidebar: #FFFFFF;
+    --text-main: #1B2559;     /* Deep Navy for readability */
+    --text-sub: #A3AED0;      /* Muted Slate */
+    --border: #E9EDF7;
+    --accent: #4318FF;        /* Vibrant Blue */
+    
+    /* Semantic aliases */
+    --primary: var(--accent);
+    --success: #01B574;
+    --warning: #FFB547;
+    --danger: #EE5D50;
+    
+    /* Shadows */
+    --shadow-float: 0px 10px 30px rgba(0, 0, 0, 0.04);
+  }
+
+  .dark {
+    --bg-page: #0B1437;
+    --bg-card: #111C44;
+    --bg-sidebar: #080E25;
+    --text-main: #FFFFFF;
+    --text-sub: #A3AED0;
+    --border: #1B254B;
+    --accent: #7551FF;
+    
+    --shadow-float: 0px 20px 50px rgba(0, 0, 0, 0.5);
+  }
+
+  body {
+    @apply bg-[var(--bg-page)] text-[var(--text-main)] transition-colors duration-300;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-200/50 dark:bg-slate-900/50;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 dark:bg-slate-700 rounded-full hover:bg-slate-400 dark:hover:bg-slate-600 transition-colors;
+  }
+
+  /* Hide scrollbar utility */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Hide number input spinners */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+}
+
+@keyframes loading {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Fix Webkit Autofill in Dark Mode */
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover, 
+.dark input:-webkit-autofill:focus, 
+.dark input:-webkit-autofill:active{
+    -webkit-box-shadow: 0 0 0 30px #0f1423 inset !important;
+    -webkit-text-fill-color: white !important;
+}

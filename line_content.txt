@@ -1,0 +1,1 @@
+                 setIsProjectDetailOpen(false);
