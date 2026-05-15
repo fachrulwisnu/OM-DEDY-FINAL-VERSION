@@ -602,13 +602,6 @@ function EditableInput({ value, onSave, className, placeholder, type = 'text', m
       onChange={(e) => {
         const val = e.target.value;
         setLocalValue(val);
-
-        if (debounceMs) {
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          timeoutRef.current = setTimeout(() => {
-            saveValue(val);
-          }, debounceMs);
-        }
       }}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
@@ -936,6 +929,7 @@ export default function App() {
   const [activeAuditTab, setActiveAuditTab] = useState<'LOG_SYSTEM' | 'HISTORY_EDIT'>('HISTORY_EDIT');
   
   const [loading, setLoading] = useState(true);
+  const [isSilentSync, setIsSilentSync] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProjectsMobileExpanded, setIsProjectsMobileExpanded] = useState(true);
@@ -1046,7 +1040,7 @@ export default function App() {
     if (!isInitialFetch.current && refreshKey === 0) return;
     
     try {
-      setLoading(true);
+      if (!isSilentSync) setLoading(true);
       const [p, u, t, a, h] = await Promise.all([
         taskService.getProjects(),
         taskService.getUsers(),
@@ -1084,8 +1078,9 @@ export default function App() {
       console.error("Fetch failed:", err);
     } finally {
       setLoading(false);
+      setIsSilentSync(false);
     }
-  }, [refreshKey]);
+  }, [refreshKey, isSilentSync]);
 
   useEffect(() => {
     fetchData();
@@ -1456,6 +1451,7 @@ export default function App() {
            setTaskHistoryLogs(histLogs);
          }
          
+         setIsSilentSync(true);
          setRefreshKey(prev => prev + 1);
 
          // --- TOR Monitor Auto-Status Sync ---
@@ -1490,8 +1486,8 @@ export default function App() {
          }
        }
        
-       if (field === 'start_time' || field === 'end_time' || field === 'status') {
-         setNotif(`Task "${task.title}" Synced Successfully.`);
+       if (['start_time', 'end_time', 'status', 'dev_name', 'qa_name', 'suggestion_fachrul', 'suggestion_barra', 'man_hours', 'detail_task'].includes(field as string)) {
+         setNotif(`Task "${task.title}" updated: ${String(field).replace('_', ' ')} saved.`);
        }
     } catch (err: any) {
        console.error('Update failed:', err);
