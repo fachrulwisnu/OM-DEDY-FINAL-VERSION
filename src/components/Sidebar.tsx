@@ -15,6 +15,7 @@ import {
   ChevronLeft, 
   ChevronRight,
   Zap,
+  Globe,
   ChevronDown,
   ChevronUp,
   Database,
@@ -74,6 +75,7 @@ export function Sidebar({
   const externalSubItems = [
     { id: 'OM_DEDY_KALDEV', label: 'OM DEDY KALDEV', icon: Zap, path: '/kaldev', roles: undefined },
     { id: 'API_DOCS', label: 'API DOCUMENTATION', icon: Database, path: '/api-docs', roles: undefined },
+    { id: 'PMA_INTEGRATION', label: 'PMA INTEGRATION', icon: Globe, path: '/pma-integration', roles: undefined },
   ];
 
   // 4. ADMINISTRATIVE

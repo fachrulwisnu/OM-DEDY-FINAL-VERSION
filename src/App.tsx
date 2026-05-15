@@ -128,6 +128,7 @@ import { NotionSyncDashboard } from './components/NotionSyncDashboard';
 import KanbanNotionAPI from './components/KanbanNotionAPI';
 import KaldevView from './components/KaldevView';
 import SwaggerDocs from './components/SwaggerDocs';
+import PmaIntegration from './components/PmaIntegration';
 import { exportToExcel } from './utils/exportExcel';
 import { CustomDatePicker } from './components/ui/CustomDatePicker';
 
@@ -2251,6 +2252,7 @@ export default function App() {
               <Route path="/notion-api-results" element={<KanbanNotionAPI />} />
               <Route path="/kaldev" element={<KaldevView />} />
               <Route path="/api-docs" element={<SwaggerDocs />} />
+              <Route path="/pma-integration" element={<PmaIntegration />} />
               <Route path="/timeline" element={<GanttDetailView {...ganttProps} projectId={null} />} />
               <Route path="/detail-timeline" element={<Navigate to="/portofolio" replace />} />
               <Route path="/detail-timeline/:projectId" element={<GanttDetailView {...ganttProps} />} />
