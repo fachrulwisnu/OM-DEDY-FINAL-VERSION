@@ -21,7 +21,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  Trash2
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -35,6 +36,7 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [viewMode, setViewMode] = useState<'ACTIVE' | 'HISTORY'>('ACTIVE');
   const [selectedProject, setSelectedProject] = useState<MasterProjectType | null>(null);
   const [auditLogs, setAuditLogs] = useState<MasterProjectAuditLog[]>([]);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
@@ -69,11 +71,20 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
   }, []);
 
   const filteredProjects = projects.filter(p => {
-    const matchesSearch = p.project_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          p.ticket_id.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          p.pic_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (p.project_name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          (p.ticket_id || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          (p.pic_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Status filter apply as usual
     const matchesStatus = statusFilter === 'ALL' || p.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    
+    if (viewMode === 'ACTIVE') {
+      // Active Master: status NOT IN ('DELETED', 'CANCEL') AND deleted_at IS NULL
+      return matchesSearch && matchesStatus && !p.deleted_at && p.status !== 'DELETED' && p.status !== 'CANCEL';
+    } else {
+      // Master History: status IN ('DELETED', 'CANCEL') OR deleted_at IS NOT NULL
+      return matchesSearch && (p.deleted_at || p.status === 'DELETED' || p.status === 'CANCEL');
+    }
   });
 
   // Reset pagination on filter change
@@ -199,6 +210,12 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
     }
   };
 
+  const handleDeleteClick = (e: React.MouseEvent, project: MasterProjectType) => {
+    e.stopPropagation();
+    setSelectedProject(project);
+    setConfirmAction('DELETE');
+  };
+
   const handleSaveEdit = async () => {
     if (!selectedProject) return;
     try {
@@ -227,12 +244,24 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
     if (!selectedProject) return;
     try {
       setLoading(true);
-      await taskService.deleteMasterProject(selectedProject.id, user?.email || 'Admin');
+      await taskService.softDeleteMasterProject(selectedProject.id, user?.email || 'Admin');
       setIsDetailOpen(false);
       setConfirmAction(null);
       fetchData();
     } catch (err) {
       alert('Gagal menghapus proyek');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRestoreProject = async (projectId: string) => {
+    try {
+      setLoading(true);
+      await taskService.restoreMasterProject(projectId, user?.email || 'Admin');
+      fetchData();
+    } catch (err) {
+      alert('Gagal memulihkan proyek');
     } finally {
       setLoading(false);
     }
@@ -334,15 +363,40 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
       </div>
 
       {/* Header & Controls */}
-      <div className={cn("flex flex-wrap items-center justify-between gap-6 bg-[var(--bg-card)]/50 p-6 rounded-[2.5rem] border border-[var(--border)] shadow-2xl", isMobile && "flex-col items-stretch")}>
-        <div className="flex items-center gap-5">
-           <div className="w-16 h-16 bg-[var(--accent)]/10 rounded-2xl flex items-center justify-center border border-[var(--accent)]/20 shadow-lg shadow-[var(--accent)]/5">
-              <FolderKanban className="w-8 h-8 text-[var(--accent)]" />
-           </div>
-           <div>
-              <h2 className="text-2xl font-black text-[var(--text-main)] italic uppercase tracking-tighter">Master <span className="text-[var(--accent)]">Projects</span></h2>
-              <p className="text-[10px] text-[var(--text-sub)] font-bold uppercase tracking-[0.2em] mt-1">Central Repository Database</p>
-           </div>
+        <div className={cn("flex flex-wrap items-center justify-between gap-6 bg-[var(--bg-card)]/50 p-6 rounded-[2.5rem] border border-[var(--border)] shadow-2xl", isMobile && "flex-col items-stretch")}>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-5">
+             <div className="w-16 h-16 bg-[var(--accent)]/10 rounded-2xl flex items-center justify-center border border-[var(--accent)]/20 shadow-lg shadow-[var(--accent)]/5">
+                <FolderKanban className="w-8 h-8 text-[var(--accent)]" />
+             </div>
+             <div>
+                <h2 className="text-2xl font-black text-[var(--text-main)] italic uppercase tracking-tighter">Master <span className="text-[var(--accent)]">Projects</span></h2>
+                <p className="text-[10px] text-[var(--text-sub)] font-bold uppercase tracking-[0.2em] mt-1">Central Repository Database</p>
+             </div>
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex bg-[var(--bg-page)] p-1 rounded-xl border border-[var(--border)] w-fit self-start">
+             <button 
+               onClick={() => setViewMode('ACTIVE')}
+               className={cn(
+                 "px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                 viewMode === 'ACTIVE' ? "bg-[var(--accent)] text-white shadow-lg" : "text-[var(--text-sub)] hover:text-[var(--text-main)]"
+               )}
+             >
+               Active Master
+             </button>
+             <button 
+               onClick={() => setViewMode('HISTORY')}
+               className={cn(
+                 "px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                 viewMode === 'HISTORY' ? "bg-slate-700 text-white shadow-lg" : "text-[var(--text-sub)] hover:text-[var(--text-main)]"
+               )}
+             >
+               <History className="w-3 h-3" />
+               Master History
+             </button>
+          </div>
         </div>
 
         <div className={cn("flex items-center gap-4", isMobile && "flex-col")}>
@@ -485,30 +539,49 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
               onClick={() => handleOpenDetail(p)}
             >
               {/* Ticket ID */}
-              <div className="flex items-center justify-between md:block">
+              <div className="flex items-center justify-between md:block shrink-0">
                 <span className="px-2 py-1 bg-[var(--bg-page)] border border-[var(--border)] rounded font-mono text-[10px] text-[var(--accent)] font-bold group-hover:border-[var(--accent)]/50 transition-colors">
                   {p.ticket_id}
                 </span>
                 {isMobile && (
                   <span className={cn(
                     "px-3 py-1 rounded-full text-[8px] font-black border uppercase tracking-widest transition-all",
-                    p.status === 'DONE' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]" :
+                    p.status === 'DONE' || p.status === 'LIVE' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]" :
                     p.status === 'ON PROGRESS' ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]" :
-                    p.status === 'ON QUEUE' ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                    p.status === 'ON QUEUE' || p.status === 'TO DO' ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                    p.status === 'DELETED' || p.status === 'CANCEL' ? "bg-rose-500/10 text-rose-500 border-rose-500/20" :
                     "bg-[var(--text-sub)]/10 text-[var(--text-sub)] border-[var(--text-sub)]/20"
                   )}>
-                    {p.status}
+                    {p.status === 'DELETED' ? 'ARCHIVED' : p.status}
                   </span>
                 )}
               </div>
 
               {/* Project Name */}
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm md:text-base font-black text-[var(--text-main)] italic tracking-tight line-clamp-2 md:line-clamp-1 group-hover:text-[var(--accent)] transition-colors">
-                  {p.project_name}
-                </h3>
-                <p className="text-[9px] text-[var(--text-sub)] font-bold tracking-widest uppercase mt-1">
-                  Updated: {format(new Date(p.updated_at), 'dd MMM yyyy')}
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm md:text-base font-black text-[var(--text-main)] italic tracking-tight line-clamp-2 md:line-clamp-1 group-hover:text-[var(--accent)] transition-colors">
+                    {p.project_name}
+                  </h3>
+                  {/* Data Source Badge next to Name */}
+                  {p.data_source === 'API' && (
+                    <span className="shrink-0 text-[7px] font-black px-1.5 py-0.5 rounded border border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.2)] bg-blue-600 text-white uppercase tracking-tighter">
+                      PMA API
+                    </span>
+                  )}
+                  {p.data_source === 'EXCEL' && (
+                    <span className="shrink-0 text-[7px] font-black px-1.5 py-0.5 rounded border border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.2)] bg-emerald-600 text-white uppercase tracking-tighter">
+                      EXCEL
+                    </span>
+                  )}
+                </div>
+                <p className="text-[9px] text-[var(--text-sub)] font-bold tracking-widest uppercase mt-1 flex items-center gap-2">
+                  <span>Updated: {format(new Date(p.updated_at), 'dd MMM yyyy')}</span>
+                  {p.last_update_text && (
+                    <span className="text-amber-500/80 italic font-medium normal-case tracking-normal truncate max-w-[200px]">
+                       • {p.last_update_text}
+                    </span>
+                  )}
                 </p>
               </div>
 
@@ -517,12 +590,13 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
                 <div>
                   <span className={cn(
                     "px-3 py-1 rounded-full text-[9px] font-black border uppercase tracking-widest transition-all",
-                    p.status === 'DONE' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
+                    p.status === 'DONE' || p.status === 'LIVE' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
                     p.status === 'ON PROGRESS' ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                    p.status === 'ON QUEUE' ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                    p.status === 'ON QUEUE' || p.status === 'TO DO' ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                    p.status === 'DELETED' || p.status === 'CANCEL' ? "bg-rose-500/10 text-rose-500 border-rose-500/20" :
                     "bg-[var(--text-sub)]/10 text-[var(--text-sub)] border-[var(--text-sub)]/20"
                   )}>
-                    {p.status}
+                    {p.status === 'DELETED' ? 'ARCHIVED' : p.status}
                   </span>
                 </div>
               )}
@@ -555,6 +629,16 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
                 "flex items-center gap-2",
                 isMobile ? "justify-end pt-2 border-t border-[var(--border)]" : "justify-center opacity-0 group-hover:opacity-100 transition-opacity"
               )}>
+                 {viewMode === 'ACTIVE' && (
+                   <button 
+                     onClick={(e) => handleDeleteClick(e, p)}
+                     className="p-2.5 bg-[var(--bg-card)] hover:bg-rose-600 text-rose-500 hover:text-white rounded-xl transition-all shadow-lg border border-[var(--border)] flex items-center gap-2"
+                     title="Delete Project"
+                   >
+                     <Trash2 className="w-4 h-4" />
+                     {isMobile && <span className="text-[10px] font-bold uppercase">Delete</span>}
+                   </button>
+                 )}
                  <button 
                    onClick={(e) => {
                      e.stopPropagation();
@@ -578,6 +662,20 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
                    <History className="w-4 h-4" />
                    {isMobile && <span className="text-[10px] font-bold uppercase">Logs</span>}
                  </button>
+
+                 {viewMode === 'HISTORY' && (p.status === 'DELETED' || p.deleted_at) && (
+                   <button 
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       handleRestoreProject(p.id);
+                     }}
+                     className="p-2.5 bg-[var(--bg-card)] hover:bg-emerald-600 text-[var(--text-sub)] hover:text-white rounded-xl transition-all shadow-lg border border-[var(--border)] flex items-center gap-2"
+                     title="Restore Project"
+                   >
+                     <RotateCcw className="w-4 h-4" />
+                     {isMobile && <span className="text-[10px] font-bold uppercase">Restore</span>}
+                   </button>
+                 )}
               </div>
             </div>
           ))}
@@ -770,25 +868,29 @@ export function MasterProject({ user, isMobile }: { user: any, isMobile?: boolea
                       </div>
 
                       <div className="flex gap-4 pt-6">
-                        <button 
-                          onClick={() => setConfirmAction('DELETE')}
-                          className="p-4 bg-red-900/20 text-red-500 hover:bg-red-600 hover:text-white rounded-2xl transition-all border border-red-500/20"
-                          title="Delete Project"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                        {viewMode === 'ACTIVE' && (
+                          <button 
+                            onClick={() => setConfirmAction('DELETE')}
+                            className="p-4 bg-red-900/20 text-red-500 hover:bg-red-600 hover:text-white rounded-2xl transition-all border border-red-500/20"
+                            title="Delete Project"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        )}
                         <button 
                           onClick={() => setIsEditMode(false)}
-                          className="flex-1 py-4 bg-slate-800 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:text-white transition-all shadow-lg"
+                          className={cn("py-4 bg-slate-800 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:text-white transition-all shadow-lg", viewMode === 'ACTIVE' ? "flex-1" : "w-full")}
                         >
-                          Cancel
+                          {viewMode === 'HISTORY' ? 'Close Editor' : 'Cancel'}
                         </button>
-                        <button 
-                          onClick={() => setConfirmAction('SAVE')}
-                          className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-500 transition-all shadow-xl shadow-indigo-600/20"
-                        >
-                          {loading ? 'Saving...' : 'Save Changes'}
-                        </button>
+                        {viewMode === 'ACTIVE' && (
+                          <button 
+                            onClick={() => setConfirmAction('SAVE')}
+                            className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-500 transition-all shadow-xl shadow-indigo-600/20"
+                          >
+                            {loading ? 'Saving...' : 'Save Changes'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (

@@ -229,6 +229,9 @@ export interface MasterProject {
   plan_start_date?: string;
   plan_end_date?: string;
   total_man_hours?: number;
+  last_update_text?: string | null;
+  data_source?: 'API' | 'EXCEL' | 'MANUAL';
+  deleted_at?: string | null;
   created_at: string;
   updated_at: string;
 }

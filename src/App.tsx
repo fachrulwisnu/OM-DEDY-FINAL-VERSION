@@ -1734,10 +1734,9 @@ export default function App() {
       const { error } = await supabase.from('projects').delete().eq('id', id);
       if (error) throw error;
 
-      // 3. Delete from master_projects if ticket_id exists
-      if (projectToDelete?.ticket_id) {
-        await supabase.from('master_projects').delete().eq('ticket_id', projectToDelete.ticket_id);
-      }
+      // 3. ISOLATED DELETION: Do NOT delete from master_projects as per Task 2
+      // Previously, we deleted from master_projects here if ticket_id existed.
+      // Now we keep master_projects as an immutable global registry.
 
       setNotif('Project berhasil dihapus');
     } catch (err: any) {
@@ -2974,50 +2973,75 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
       // Update local state manually to prevent loop or unnecessary refetch
       setProjects(prev => [prj, ...prev]);
 
-      const allTasksToCreate: Partial<Task>[] = [];
+      // --- TASK 1: FIX PROJECT WIZARD L1 GROUPING ---
+      // Group phases by their title to prevent duplicate L1 entries
+      const groupedPhases = new Map<string, any[]>();
+      phases.forEach(p => {
+        const pTitle = (p.title || 'Untitled Phase').trim();
+        if (!groupedPhases.has(pTitle)) groupedPhases.set(pTitle, []);
+        groupedPhases.get(pTitle)!.push(p);
+      });
 
-      for (const phase of phases) {
-        const mH = parseFloat(String(phase.man_hours ?? 0)) || 0;
-        const phaseStartStr = phase.start_date || pStart || format(new Date(), 'yyyy-MM-dd');
-        const phaseEndStr = phase.end_date || pEnd || format(addDays(new Date(phaseStartStr), 7), 'yyyy-MM-dd');
+      for (const [l1Title, pList] of groupedPhases.entries()) {
+        try {
+          // Calculate aggregate metrics for this L1 Group
+          const totalMH = pList.reduce((sum, p) => sum + (parseFloat(String(p.man_hours ?? 0)) || 0), 0);
+          
+          const groupDates: number[] = [];
+          pList.forEach(p => {
+            if (p.start_date) groupDates.push(new Date(`${p.start_date}T00:00:00`).getTime());
+            if (p.end_date) groupDates.push(new Date(`${p.end_date}T23:59:59`).getTime());
+            p.subtasks?.forEach((s: any) => {
+              if (s.start_date) groupDates.push(new Date(`${s.start_date}T00:00:00`).getTime());
+              if (s.end_date) groupDates.push(new Date(`${s.end_date}T23:59:59`).getTime());
+            });
+          });
 
-        // TASK 4: SEQUENTIAL EXECUTION FLOW - Step 3 (L1)
-        const l1 = await taskService.createTask({
-          title: phase.title || 'Untitled Phase',
-          status: 'TODO' as any,
-          project_id: prj.id,
-          assignee: (phase as any).assignee || finalPic,
-          start_time: new Date(`${phaseStartStr}T08:00:00`).toISOString(),
-          end_time: new Date(`${phaseEndStr}T17:00:00`).toISOString(),
-          man_hours: mH,
-          duration_hours: mH,
-          created_by_name: user?.name || actorName
-        }, actorEmail);
-        
-        // Manual local state update to prevent loop
-        setTasks(prev => [...prev, { ...l1, level: 1 }]);
+          const groupStart = groupDates.length > 0 ? format(new Date(Math.min(...groupDates)), 'yyyy-MM-dd') : pStart;
+          const groupEnd = groupDates.length > 0 ? format(new Date(Math.max(...groupDates)), 'yyyy-MM-dd') : pEnd;
 
-        // TASK 4: SEQUENTIAL EXECUTION FLOW - Step 3 (L2)
-        for (const sub of phase.subtasks) {
-          const subMH = parseFloat(String(sub.man_hours ?? 0)) || 0;
-          const subStartStr = sub.start_date || phaseStartStr || pStart || format(new Date(), 'yyyy-MM-dd');
-          const subEndStr = sub.end_date || subStartStr || phaseEndStr || pEnd || format(addDays(new Date(subStartStr), 7), 'yyyy-MM-dd');
-
-          const s = await taskService.createTask({
-            title: sub.title || 'Untitled Sub-task',
+          // Step 1: Provision the Unified L1 Phase
+          const l1 = await taskService.createTask({
+            title: l1Title,
             status: 'TODO' as any,
-            task_type: (sub as any).task_type || 'New Feature',
             project_id: prj.id,
-            parent_id: l1.id,
-            assignee: (sub as any).assignee || finalPic,
-            start_time: new Date(`${subStartStr}T08:00:00`).toISOString(),
-            end_time: new Date(`${subEndStr}T17:00:00`).toISOString(),
-            man_hours: subMH,
-            duration_hours: subMH,
+            assignee: pList[0].assignee || finalPic,
+            start_time: new Date(`${groupStart}T08:00:00`).toISOString(),
+            end_time: new Date(`${groupEnd}T17:00:00`).toISOString(),
+            man_hours: totalMH,
+            duration_hours: totalMH,
             created_by_name: user?.name || actorName
           }, actorEmail);
           
-          setTasks(prev => [...prev, { ...s, level: 2 }]);
+          setTasks(prev => [...prev, { ...l1, level: 1 }]);
+
+          // Step 2: Provision all L2 Subtasks for this group
+          for (const p of pList) {
+            for (const sub of p.subtasks) {
+              const subMH = parseFloat(String(sub.man_hours ?? 0)) || 0;
+              const subStartStr = sub.start_date || p.start_date || groupStart;
+              const subEndStr = sub.end_date || subStartStr || p.end_date || groupEnd;
+
+              const s = await taskService.createTask({
+                title: sub.title || 'Untitled Sub-task',
+                status: 'TODO' as any,
+                task_type: (sub as any).task_type || 'New Feature',
+                project_id: prj.id,
+                parent_id: l1.id, // Linked to the grouped parent
+                assignee: (sub as any).assignee || p.assignee || finalPic,
+                start_time: new Date(`${subStartStr}T08:00:00`).toISOString(),
+                end_time: new Date(`${subEndStr}T17:00:00`).toISOString(),
+                man_hours: subMH,
+                duration_hours: subMH,
+                created_by_name: user?.name || actorName
+              }, actorEmail);
+              
+              setTasks(prev => [...prev, { ...s, level: 2 }]);
+            }
+          }
+        } catch (l1Error: any) {
+          console.error(`Grouped Phase Creation Failure [${l1Title}]:`, l1Error);
+          throw new Error(`Failed to provision grouped phase "${l1Title}": ${l1Error.message || 'Unknown error'}`);
         }
       }
 

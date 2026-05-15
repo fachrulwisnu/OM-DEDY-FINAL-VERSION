@@ -860,10 +860,25 @@ export const taskService = {
   async updateMasterProject(id: string, updates: Partial<MasterProject>, actor: string): Promise<MasterProject> {
     const { data: existing } = await supabase.from('master_projects').select('*').eq('id', id).single();
     
+    const changedFields: any = {};
+    Object.keys(updates).forEach(key => {
+      if (key !== 'updated_at' && (updates as any)[key] !== (existing as any)[key]) {
+        changedFields[key] = { from: (existing as any)[key], to: (updates as any)[key] };
+      }
+    });
+
+    // Create a summary for last_update_text if not provided
+    let lastUpdateText = updates.last_update_text;
+    if (!lastUpdateText && Object.keys(changedFields).length > 0) {
+      const fieldNames = Object.keys(changedFields).map(f => f.replace('_', ' ').toUpperCase());
+      lastUpdateText = `Modified: ${fieldNames.join(', ')}`;
+    }
+
     const { data: updated, error } = await supabase
       .from('master_projects')
       .update({
         ...updates,
+        last_update_text: lastUpdateText,
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
@@ -871,18 +886,11 @@ export const taskService = {
       .single();
     if (error) throw error;
 
-    const changedFields: any = {};
-    Object.keys(updates).forEach(key => {
-      if ((updates as any)[key] !== (existing as any)[key]) {
-        changedFields[key] = { from: (existing as any)[key], to: (updates as any)[key] };
-      }
-    });
-
     await this.logMasterProjectAudit({
       master_project_id: id,
       actor,
       action: 'UPDATE',
-      note: `Updated: ${Object.keys(changedFields).join(', ')}`,
+      note: lastUpdateText || `Updated ${Object.keys(changedFields).length} fields`,
       changed_fields: JSON.stringify(changedFields)
     });
 
@@ -897,6 +905,41 @@ export const taskService = {
       actor,
       action: 'DELETE',
       note: 'The record was permanently deleted from the Master Repository.'
+    });
+  },
+
+  async softDeleteMasterProject(id: string, actor: string): Promise<void> {
+    const { error } = await supabase
+      .from('master_projects')
+      .update({ 
+        deleted_at: new Date().toISOString(),
+        status: 'DELETED',
+        last_update_text: 'Project deleted by user'
+      })
+      .eq('id', id);
+    if (error) throw error;
+    await this.logMasterProjectAudit({
+      master_project_id: id,
+      actor,
+      action: 'DELETE',
+      note: 'The record was soft-deleted (archived).'
+    });
+  },
+
+  async restoreMasterProject(id: string, actor: string): Promise<void> {
+    const { error } = await supabase
+      .from('master_projects')
+      .update({ 
+        deleted_at: null,
+        status: 'OPEN'
+      })
+      .eq('id', id);
+    if (error) throw error;
+    await this.logMasterProjectAudit({
+      master_project_id: id,
+      actor,
+      action: 'UPDATE',
+      note: 'The record was restored from history.'
     });
   },
 

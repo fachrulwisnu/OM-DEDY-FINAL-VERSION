@@ -20,6 +20,13 @@ type SyncStatus = 'IDLE' | 'SYNCING' | 'COMPLETED';
 export function NotionSyncDashboard() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('IDLE');
   const [logs, setLogs] = useState<string[]>([]);
+  const [report, setReport] = useState<any>(null);
+  
+  // Use VITE_ prefix to expose to client if necessary
+  const envDbId = (import.meta as any).env.VITE_NOTION_DATABASE_ID || "";
+  const initialMaskedId = envDbId ? (envDbId.length > 10 ? `${envDbId.slice(0, 8)}...${envDbId.slice(-8)}` : envDbId) : null;
+  
+  const [activeDatabaseId, setActiveDatabaseId] = useState<string | null>(initialMaskedId);
   const [result, setResult] = useState<{ updated: number; inserted: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -61,7 +68,16 @@ export function NotionSyncDashboard() {
 
       if (data.success) {
         setLogs(prev => [...prev, ...(data.logs || [])]);
-        if (data.updated !== undefined && data.inserted !== undefined) {
+        if (data.databaseId) {
+          setActiveDatabaseId(data.databaseId);
+        }
+        if (data.report) {
+          setReport(data.report);
+          setResult({
+            updated: data.report.updatedItemsCount,
+            inserted: data.report.newItemsCount
+          });
+        } else if (data.updated !== undefined && data.inserted !== undefined) {
           setResult({
             updated: data.updated,
             inserted: data.inserted
@@ -120,7 +136,9 @@ export function NotionSyncDashboard() {
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Source</span>
                   <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Notion DB</span>
                 </div>
-                <p className="text-[11px] font-bold text-white truncate opacity-60">ID: 3a214cd8...cce3b260</p>
+                <p className="text-[11px] font-bold text-white truncate opacity-60">
+                  ID: {activeDatabaseId || "3a214cd8...cce3b260"}
+                </p>
               </div>
 
               <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
@@ -192,6 +210,22 @@ export function NotionSyncDashboard() {
                   <span className="text-2xl font-black text-white">{result.inserted}</span>
                 </div>
               </div>
+
+              {report?.changes && report.changes.length > 0 && (
+                <div className="mb-6 space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                  {report.changes.map((change: any, i: number) => (
+                    <div key={i} className="text-[10px] p-2 rounded bg-black/20 border border-white/5 flex gap-2">
+                       <span className={cn(
+                         "font-black tracking-tighter shrink-0",
+                         change.action === 'NEW_INSERT' ? "text-emerald-500" : "text-indigo-400"
+                       )}>
+                         [{change.action === 'NEW_INSERT' ? 'NEW' : 'UPD'}]
+                       </span>
+                       <span className="text-slate-400 truncate flex-1">{change.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <button 
                 onClick={() => navigate('/notion-api-results')}

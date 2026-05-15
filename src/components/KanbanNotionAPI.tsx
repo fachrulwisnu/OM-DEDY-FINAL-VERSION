@@ -38,6 +38,7 @@ export default function KanbanNotionAPI() {
   const [data, setData] = useState<NotionApiProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncReport, setSyncReport] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(MIGRATION_STATUSES);
   const [selectedProject, setSelectedProject] = useState<NotionApiProject | null>(null);
@@ -55,8 +56,8 @@ export default function KanbanNotionAPI() {
     console.log("KanbanNotionAPI Auth:", isLoggedIn ? `Logged in as ${userIdentifier}` : "Public View");
   }, [isLoggedIn, session, currentUser]);
 
-  const fetchSyncedData = async () => {
-    setLoading(true);
+  const fetchSyncedData = async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     try {
       const { data, error } = await supabase
         .from('notion_api_projects')
@@ -74,12 +75,21 @@ export default function KanbanNotionAPI() {
     } catch (err: any) {
       console.error("Error fetching synced data:", err);
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchSyncedData();
+
+    // Task 3: 20-Minute Background Auto-Sync
+    const SYNC_INTERVAL_MS = 1200000; // 20 minutes
+    const intervalId = setInterval(() => {
+      console.log("Triggering 20-minute background Notion sync...");
+      handleSync(true); 
+    }, SYNC_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
   }, []);
 
   const filteredData = useMemo(() => {
@@ -259,20 +269,28 @@ export default function KanbanNotionAPI() {
     );
   };
 
-  const handleSync = async () => {
-    setSyncing(true);
+  const handleSync = async (isSilent = false) => {
+    if (!isSilent) {
+      setSyncing(true);
+      setSyncReport(null);
+    }
+    
     try {
       const response = await fetch('/api/sync-notion', { method: 'POST' });
       const result = await response.json();
       if (result.success) {
-        await fetchSyncedData();
+        if (!isSilent) setSyncReport(result.report);
+        await fetchSyncedData(isSilent);
+        if (isSilent) console.log("Background Notion sync complete.");
       } else {
         console.error("Sync failed:", result.error);
+        if (!isSilent) alert(`Sync failed: ${result.error}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Sync error:", err);
+      if (!isSilent) alert(`Sync error: ${err.message}`);
     } finally {
-      setSyncing(false);
+      if (!isSilent) setSyncing(false);
     }
   };
 
@@ -313,7 +331,7 @@ export default function KanbanNotionAPI() {
         </div>
 
         <button 
-          onClick={handleSync}
+          onClick={() => handleSync()}
           disabled={syncing}
           className={cn(
             "px-6 py-3 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent)]/90 text-white text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-[var(--accent)]/20 flex items-center gap-2",
@@ -333,6 +351,71 @@ export default function KanbanNotionAPI() {
           )}
         </button>
       </div>
+
+      {/* Sync Report UI */}
+      <AnimatePresence>
+        {syncReport && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="mb-8 bg-[var(--bg-card)] border border-emerald-500/20 rounded-2xl overflow-hidden shadow-xl"
+          >
+            <div className="bg-emerald-500/10 px-6 py-4 border-b border-emerald-500/20 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <CheckSquare className="w-5 h-5 text-emerald-500" />
+                <h3 className="text-sm font-black uppercase tracking-widest text-white">Last Sync Result</h3>
+              </div>
+              <button 
+                onClick={() => setSyncReport(null)}
+                className="text-slate-500 hover:text-white transition-colors"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="flex gap-4">
+                <div className="flex-1 bg-black/20 p-4 rounded-xl border border-white/5">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">New Projects</span>
+                  <span className="text-2xl font-black text-emerald-400">{syncReport.newItemsCount}</span>
+                </div>
+                <div className="flex-1 bg-black/20 p-4 rounded-xl border border-white/5">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Status Updates</span>
+                  <span className="text-2xl font-black text-indigo-400">{syncReport.updatedItemsCount}</span>
+                </div>
+              </div>
+
+              {syncReport.changes.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Detailed Log</h4>
+                  <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                    {syncReport.changes.map((change: any, i: number) => (
+                      <div key={i} className="flex items-start gap-3 text-[11px] p-2 rounded bg-black/10 border border-white/5">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded text-[9px] font-black tracking-tighter",
+                          change.action === 'NEW_INSERT' ? "bg-emerald-500/10 text-emerald-500" : "bg-indigo-500/10 text-indigo-500"
+                        )}>
+                          {change.action === 'NEW_INSERT' ? 'NEW' : 'UPDATE'}
+                        </span>
+                        <div className="flex-1">
+                          <span className="font-bold text-white mr-2">{change.ticket_id}</span>
+                          <span className="text-slate-400">{change.name}</span>
+                          {change.action === 'STATUS_UPDATE' && (
+                            <p className="text-[10px] text-slate-500 mt-1">
+                              Status changed: <span className="text-rose-400 line-through opacity-50">{change.old}</span> → <span className="text-emerald-400 font-bold">{change.new}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Summary Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mb-8">
