@@ -50,13 +50,15 @@ const Endpoint = ({
   path, 
   description, 
   exampleResponse,
-  parameters = []
+  parameters = [],
+  defaultBody
 }: { 
   method: string, 
   path: string, 
   description: string, 
   exampleResponse?: any,
-  parameters?: { name: string, placeholder: string, type: string }[]
+  parameters?: { name: string, placeholder: string, type: string }[],
+  defaultBody?: any
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputs, setInputs] = useState<Record<string, string>>(() => {
@@ -64,6 +66,9 @@ const Endpoint = ({
     parameters.forEach(p => initial[p.name] = p.placeholder);
     return initial;
   });
+  const [bodyData, setBodyData] = useState(() => 
+    defaultBody ? JSON.stringify(defaultBody, null, 2) : ''
+  );
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<{ status: number, data: any } | null>(null);
 
@@ -81,14 +86,22 @@ const Endpoint = ({
     try {
       const apiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ubXRsam5uZmR1YWdxZHlyc29sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4ODI0OTMsImV4cCI6MjA5MzQ1ODQ5M30.NcZe4HDiIp2dUSRKQJXeTTEwPTFLEQM1Qh7aXS3DwyQ";
       const url = getFullUrl();
-      const res = await fetch(url, {
-        method: 'GET',
+      
+      const fetchOptions: RequestInit = {
+        method: method,
         headers: {
           'apikey': apiKey,
           'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(method === 'POST' ? { 'Prefer': 'return=representation' } : {})
         }
-      });
+      };
+
+      if (method !== 'GET' && bodyData) {
+        fetchOptions.body = bodyData;
+      }
+
+      const res = await fetch(url, fetchOptions);
       const data = await res.json();
       setResponse({ status: res.status, data });
     } catch (error) {
@@ -107,7 +120,9 @@ const Endpoint = ({
         <div className="flex items-center gap-5">
           <span className={cn(
             "px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-widest border shadow-sm",
-            method === 'GET' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+            method === 'GET' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : 
+            method === 'POST' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+            "bg-amber-500/10 text-amber-400 border-amber-500/20"
           )}>
             {method}
           </span>
@@ -139,22 +154,36 @@ const Endpoint = ({
                 <div className="h-px flex-1 bg-indigo-500/10 mx-4" />
               </div>
 
-              {parameters.length > 0 && (
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {parameters.map(p => (
-                    <div key={p.name} className="space-y-2">
-                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">{p.name}</label>
-                      <input 
-                        type={p.type}
-                        value={inputs[p.name]}
-                        onChange={(e) => setInputs(prev => ({ ...prev, [p.name]: e.target.value }))}
-                        placeholder={p.placeholder}
-                        className="w-full bg-[#020437] border border-indigo-500/20 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-all font-mono"
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="space-y-6">
+                {parameters.length > 0 && (
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {parameters.map(p => (
+                      <div key={p.name} className="space-y-2">
+                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">{p.name}</label>
+                        <input 
+                          type={p.type}
+                          value={inputs[p.name]}
+                          onChange={(e) => setInputs(prev => ({ ...prev, [p.name]: e.target.value }))}
+                          placeholder={p.placeholder}
+                          className="w-full bg-[#020437] border border-indigo-500/20 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-all font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {method !== 'GET' && (
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest ml-1">JSON Body</label>
+                    <textarea 
+                      value={bodyData}
+                      onChange={(e) => setBodyData(e.target.value)}
+                      rows={10}
+                      className="w-full bg-[#020437] border border-indigo-500/20 rounded-xl px-4 py-3 text-[11px] font-mono text-indigo-100 placeholder:text-slate-700 focus:outline-none focus:border-indigo-500/50 transition-all leading-relaxed"
+                    />
+                  </div>
+                )}
+              </div>
 
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
@@ -167,7 +196,7 @@ const Endpoint = ({
                     {loading ? 'Executing...' : 'Send Request'}
                   </button>
                   <code className="flex-1 overflow-hidden transition-all text-xs font-mono text-slate-500 truncate bg-black/50 px-3 py-2.5 rounded-xl border border-white/5 opacity-50 hover:opacity-100 hover:text-indigo-300">
-                    {getFullUrl()}
+                    {method} {getFullUrl().replace('https://nnmtljnnfduagqdyrsol.supabase.co/rest/v1', '')}
                   </code>
                 </div>
 
@@ -184,9 +213,9 @@ const Endpoint = ({
                           <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">HTTP Status:</span>
                           <span className={cn(
                             "px-2 py-0.5 rounded text-[10px] font-black transition-colors",
-                            response.status >= 200 && response.status < 300 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                            response.status >= 200 && response.status < 400 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
                           )}>
-                            {response.status} {response.status === 200 ? 'OK' : response.status === 401 ? 'Unauthorized' : 'Error'}
+                            {response.status} {response.status === 200 ? 'OK' : response.status === 201 ? 'Created' : response.status === 204 ? 'No Content' : response.status === 401 ? 'Unauthorized' : 'Error'}
                           </span>
                         </div>
                         <span className="text-[9px] font-mono text-slate-600">application/json</span>
@@ -329,11 +358,11 @@ Content-Type: application/json`;
                </div>
             </section>
 
-            {/* TASK 3: ENDPOINTS LIST (ACCORDION UI) */}
+            {/* SECTION A: PULL DATA (GET) */}
             <section className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-300">
               <div className="flex items-center gap-3">
                 <Terminal className="w-6 h-6 text-blue-400" />
-                <h2 className="text-lg font-black uppercase tracking-tighter italic">Primary Endpoints</h2>
+                <h2 className="text-lg font-black uppercase tracking-tighter italic">PULL DATA (Om Dedy to Kaldev)</h2>
               </div>
               <div className="space-y-6">
                 <Endpoint 
@@ -361,17 +390,62 @@ Content-Type: application/json`;
               </div>
             </section>
 
-            {/* TASK 4: JSON RESPONSE SCHEMA */}
+            {/* SECTION B: PUSH DATA (POST & PATCH) */}
             <section className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-400">
               <div className="flex items-center gap-3">
                 <Database className="w-6 h-6 text-emerald-400" />
-                <h2 className="text-lg font-black uppercase tracking-tighter italic">Standard Response Schema</h2>
+                <h2 className="text-lg font-black uppercase tracking-tighter italic">PUSH DATA (Kaldev to Om Dedy)</h2>
+              </div>
+              <div className="space-y-6">
+                <Endpoint 
+                  method="POST" 
+                  path="/kaldev_projects" 
+                  description="Create New Project: Push a brand new project ticket into Om Dedy's system."
+                  defaultBody={{
+                    "ticket_id": "KAL-NEW-001",
+                    "project_name": "Modul E-KYC",
+                    "programmer_name": "Bimo",
+                    "priority": "High",
+                    "project_type": "New Feature",
+                    "status_kaldev": "TODO",
+                    "progress_percent": 0,
+                    "mandays": 14.5,
+                    "realized_days": 0,
+                    "is_late": false,
+                    "is_asap": true,
+                    "leader_name": "Fachrul Wisnu Novianto",
+                    "client_name": "PT Jaya Agung",
+                    "updated_at_kaldev": "2026-05-13T21:00:00Z"
+                  }}
+                />
+                <Endpoint 
+                  method="PATCH" 
+                  path="/kaldev_projects?ticket_id=eq.{ticket_id}" 
+                  description="Update Project Progress: Sync progress or status changes. Partial update supported."
+                  parameters={[
+                    { name: 'ticket_id', placeholder: 'KAL-NEW-001', type: 'text' }
+                  ]}
+                  defaultBody={{
+                    "status_kaldev": "DEVELOPMENT ON PROGRESS",
+                    "progress_percent": 45,
+                    "realized_days": 5.5,
+                    "updated_at_kaldev": "2026-05-13T21:00:00Z"
+                  }}
+                />
+              </div>
+            </section>
+
+            {/* TASK 4: JSON RESPONSE SCHEMA */}
+            <section className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-500">
+              <div className="flex items-center gap-3">
+                <Database className="w-6 h-6 text-indigo-400" />
+                <h2 className="text-lg font-black uppercase tracking-tighter italic">Standard Response Schema Reference</h2>
               </div>
               <div className="bg-[#020437] rounded-3xl border border-indigo-500/20 p-2 shadow-inner">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
                   <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                    <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest leading-none">Full Response Mockup</span>
+                    <div className="w-2 h-2 rounded-full bg-indigo-500" />
+                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none">Full Response Mockup</span>
                   </div>
                 </div>
                 <div className="p-4">
