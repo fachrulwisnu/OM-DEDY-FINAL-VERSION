@@ -172,7 +172,7 @@ const getCollision = (currentTask: Task, allTasks: Task[], projects: Project[]) 
     if (!timeOverlap) return false;
 
     const samePIC = currentTask.assignee && task.assignee && currentTask.assignee === task.assignee;
-    const sameDev = currentTask.developer_name && task.developer_name && currentTask.developer_name === task.developer_name;
+    const sameDev = currentTask.dev_name && task.dev_name && currentTask.dev_name === task.dev_name;
     const sameQA = currentTask.qa_name && task.qa_name && currentTask.qa_name === task.qa_name;
 
     return samePIC || sameDev || sameQA;
@@ -1422,14 +1422,14 @@ export default function App() {
 
        // Handle empty string as null for nullable fields (Dev, QA, Feedbacks, etc.)
        const nullableFields: (keyof Task)[] = [
-         'developer_name', 
-         'qa_name', 
-         'suggestion_fachrul', 
-         'suggestion_barra', 
-         'realized_finish_date',
-         'detail_task'
-       ];
-       if (nullableFields.includes(field) && finalVal === "") {
+        'dev_name', 
+        'qa_name', 
+        'suggestion_fachrul', 
+        'suggestion_barra', 
+        'realized_finish_date',
+        'detail_task'
+      ];
+      if (nullableFields.includes(field as any) && finalVal === "") {
          finalVal = null;
        }
 
@@ -8158,8 +8158,8 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
           <td className="px-2 py-4" onClick={e => e.stopPropagation()}>
             {level > 0 && (
               <EditableInput 
-                value={task.developer_name || ''} 
-                onSave={(v) => onUpdateTask(task.id, 'developer_name', v)}
+                value={task.dev_name || ''} 
+                onSave={(v) => onUpdateTask(task.id, 'dev_name', v)}
                 debounceMs={800}
                 className="bg-[var(--bg-page)] border border-[var(--border)] text-[10px] px-1.5 py-1 rounded text-[var(--accent)] text-center hover:border-[var(--accent)] transition-all font-mono w-full"
                 placeholder="Dev"

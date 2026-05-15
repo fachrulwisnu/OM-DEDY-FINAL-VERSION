@@ -59,7 +59,7 @@ export interface Task {
   project_id: string | null;
   title: string;
   assignee: string; // Used as display name (free text)
-  developer_name?: string;
+  dev_name?: string;
   qa_name?: string;
   start_time: string; // ISO string
   end_time: string;   // ISO string

@@ -1058,7 +1058,7 @@ export const taskService = {
       parent_id: p1_root.id, 
       project_id: prj1.id, 
       assignee: 'William', 
-      developer_name: 'William',
+      dev_name: 'William',
       start_time: day(8), 
       end_time: day(15) 
     }, actor);
@@ -1077,7 +1077,7 @@ export const taskService = {
       parent_id: p2_root.id, 
       project_id: prj2.id, 
       assignee: 'William', 
-      developer_name: 'William',
+      dev_name: 'William',
       start_time: day(12), 
       end_time: day(18) 
     }, actor);
