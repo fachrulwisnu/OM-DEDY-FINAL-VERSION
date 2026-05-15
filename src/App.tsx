@@ -54,9 +54,32 @@ import {
   Copy,
   Database,
   FileText,
-  Info
+  Info,
+  GripVertical
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  DndContext, 
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+  defaultDropAnimationSideEffects
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToVerticalAxis, restrictToWindowEdges } from '@dnd-kit/modifiers';
+import { Toaster, toast } from 'react-hot-toast';
 import { 
   format, 
   addHours, 
@@ -861,6 +884,12 @@ export default function App() {
   }, [location.pathname, viewState]);
 
   const setActiveView = (view: AppView) => {
+    if (hasUnsavedChanges) {
+      if (!window.confirm("Ada data yang belum tersimpan. Lanjutkan pindah halaman?")) {
+        return;
+      }
+      setHasUnsavedChanges(false);
+    }
     setViewState(view);
     switch(view) {
       case 'PROJECTS': navigate('/portofolio'); break;
@@ -911,6 +940,19 @@ export default function App() {
       setSelectedProjectId(null);
     }
   }, [location.pathname]);
+
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   const [notif, setNotif] = useState<string | null>(null);
   
@@ -2287,12 +2329,18 @@ export default function App() {
               user={user}
               users={users}
               isMobile={isMobile}
-              onClose={() => setIsCreateProjectModalOpen(false)} 
+              onClose={() => {
+                setIsCreateProjectModalOpen(false);
+                setHasUnsavedChanges(false);
+              }} 
               onSuccess={() => {
                 setNotif("Project Created Successfully!");
+                setHasUnsavedChanges(false);
               }} 
               setProjects={setProjects}
               setTasks={setTasks}
+              setHasUnsavedChanges={setHasUnsavedChanges}
+              hasUnsavedChanges={hasUnsavedChanges}
             />
           </ErrorBoundary>
         )}
@@ -2306,12 +2354,18 @@ export default function App() {
               user={user}
               users={users}
               isMobile={isMobile}
-              onClose={() => setIsEditWBSModalOpen(false)}
+              onClose={() => {
+                setIsEditWBSModalOpen(false);
+                setHasUnsavedChanges(false);
+              }}
               onSuccess={() => {
                 setNotif("Project Timeline Updated Successfully!");
+                setHasUnsavedChanges(false);
               }}
               setProjects={setProjects}
               setTasks={setTasks}
+              setHasUnsavedChanges={setHasUnsavedChanges}
+              hasUnsavedChanges={hasUnsavedChanges}
             />
           </ErrorBoundary>
         )}
@@ -2558,6 +2612,24 @@ export default function App() {
             />
           )}
         </AnimatePresence>
+        
+        <AnimatePresence>
+          {notif && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.95 }}
+              className="fixed bottom-10 left-10 z-[200] bg-indigo-600 text-white px-8 py-4 rounded-2xl shadow-2xl shadow-indigo-600/40 flex items-center gap-4 border border-white/20 backdrop-blur-xl"
+            >
+              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center animate-pulse">
+                <Info className="w-4 h-4" />
+              </div>
+              <span className="font-black uppercase text-xs tracking-widest">{notif}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <Toaster position="top-right" reverseOrder={false} />
       </AnimatePresence>
     </div>
   );
@@ -2765,6 +2837,9 @@ function ProjectRescheduleModal({ project, user, onClose, onSuccess }: { project
 
 
 function L1PhaseSelector({ value, onChange, className, disabled }: { value: string, onChange: (v: string) => void, className?: string, disabled?: boolean }) {
+  if (disabled) {
+    return <span className={cn(className, "cursor-default whitespace-normal break-words")}>{value || 'SELECT PHASE...'}</span>;
+  }
   return (
     <select 
       value={value}
@@ -2783,7 +2858,16 @@ function L1PhaseSelector({ value, onChange, className, disabled }: { value: stri
   );
 }
 
-function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProjects, setTasks }: { onClose: () => void, onSuccess: () => void, user: any, users: AppUser[], isMobile?: boolean, setProjects: React.Dispatch<React.SetStateAction<Project[]>>, setTasks: React.Dispatch<React.SetStateAction<Task[]>> }) {
+function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProjects, setTasks, setHasUnsavedChanges, hasUnsavedChanges }: { onClose: () => void, onSuccess: () => void, user: any, users: AppUser[], isMobile?: boolean, setProjects: React.Dispatch<React.SetStateAction<Project[]>>, setTasks: React.Dispatch<React.SetStateAction<Task[]>>, setHasUnsavedChanges: (val: boolean) => void, hasUnsavedChanges: boolean }) {
+  const [showDeddyModal, setShowDeddyModal] = useState(false);
+
+  const handleAttemptClose = () => {
+    if (hasUnsavedChanges) {
+      setShowDeddyModal(true);
+    } else {
+      onClose();
+    }
+  };
   const [title, setTitle] = useState('');
   const [pic, setPic] = useState(user?.name || user?.email || '');
   const [ticketId, setTicketId] = useState('');
@@ -2821,7 +2905,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
     }]
   }]);
   const [loading, setLoading] = useState(false);
-
+  
   const selectMasterProject = (master: MasterProject) => {
     setIsSyncing(true);
     setTicketId(master.ticket_id);
@@ -2877,6 +2961,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
   const isAnyOverAllocated = allocationStats.some(s => s.isOver);
 
   const addPhase = () => {
+    setHasUnsavedChanges(true);
     setPhases([...phases, { 
       id: createPersistentId(),
       custom_id: `#PH-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
@@ -2906,6 +2991,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
   };
 
   const addSubtask = (phaseIndex: number) => {
+    setHasUnsavedChanges(true);
     setPhases(prev => {
       const next = [...prev];
       const phase = { ...next[phaseIndex] };
@@ -3070,7 +3156,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
             </h2>
             <p className="text-[10px] text-[var(--text-sub)] mt-1 font-bold uppercase tracking-widest">Multi-Level Batch Provisioning</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-[var(--bg-page)] rounded-full transition-colors">
+          <button onClick={handleAttemptClose} className="p-2 hover:bg-[var(--bg-page)] rounded-full transition-colors">
             <Plus className="w-5 h-5 text-[var(--text-sub)] rotate-45" />
           </button>
         </div>
@@ -3083,7 +3169,10 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
                 <label className="text-[10px] font-black text-[var(--accent)] uppercase tracking-widest px-1">Ticket ID</label>
                 <TicketSelector 
                   value={ticketId}
-                  onChange={(val) => setTicketId(val)}
+                  onChange={(val) => {
+                    setTicketId(val);
+                    setHasUnsavedChanges(true);
+                  }}
                   onSelectMaster={selectMasterProject}
                 />
               </div>
@@ -3092,7 +3181,10 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
                 <label className="text-[10px] font-black text-[var(--text-sub)] uppercase tracking-widest px-1">Lead PIC</label>
                 <LocalInput 
                   value={pic}
-                  onChange={v => setPic(v)}
+                  onChange={v => {
+                    setPic(v);
+                    setHasUnsavedChanges(true);
+                  }}
                   placeholder="Lead PIC Name..."
                   className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--text-main)] outline-none focus:border-[var(--accent)] transition-colors font-bold"
                 />
@@ -3124,7 +3216,10 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
                 rows={2}
                 autoFocus={!ticketId}
                 value={title}
-                onChange={e => setTitle(e.target.value)}
+                onChange={e => {
+                  setTitle(e.target.value);
+                  setHasUnsavedChanges(true);
+                }}
                 placeholder="Ex Detail: Pengembangan Fitur Automated Reporting..."
                 className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--text-main)] outline-none focus:border-[var(--accent)] transition-colors font-bold text-sm resize-none"
               />
@@ -3136,7 +3231,10 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
                 <label className="text-[10px] font-black text-[var(--text-sub)] uppercase tracking-widest px-1">Owner Name</label>
                 <LocalInput 
                   value={ownerName}
-                  onChange={v => setOwnerName(v)}
+                  onChange={v => {
+                    setOwnerName(v);
+                    setHasUnsavedChanges(true);
+                  }}
                   placeholder="Enter Owner Name..."
                   className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl px-4 py-4 text-sm text-[var(--text-main)] outline-none focus:border-[var(--accent)] font-bold"
                 />
@@ -3145,7 +3243,10 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
                 <label className="text-[10px] font-black text-[var(--text-sub)] uppercase tracking-widest px-1">Division</label>
                 <LocalInput 
                   value={divOwner}
-                  onChange={v => setDivOwner(v)}
+                  onChange={v => {
+                    setDivOwner(v);
+                    setHasUnsavedChanges(true);
+                  }}
                   placeholder="Enter Division Name..."
                   className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl px-4 py-4 text-sm text-[var(--text-main)] outline-none focus:border-[var(--accent)] font-bold"
                 />
@@ -3158,7 +3259,10 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
               <textarea 
                 rows={4}
                 value={projectDiajukan}
-                onChange={e => setProjectDiajukan(e.target.value)}
+                onChange={e => {
+                  setProjectDiajukan(e.target.value);
+                  setHasUnsavedChanges(true);
+                }}
                 placeholder="Ringkasan pengajuan project..."
                 className="w-full bg-[#111C44] border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:ring-[var(--accent)] transition-colors font-bold text-sm resize-none"
               />
@@ -3520,7 +3624,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
           <div className="flex gap-4">
             <button 
               disabled={loading}
-              onClick={onClose}
+              onClick={handleAttemptClose}
               className="px-8 py-3 bg-[var(--bg-page)] hover:bg-[var(--bg-card)] text-[var(--text-sub)] font-black uppercase text-[10px] tracking-widest rounded-xl transition-all"
             >
               Cancel
@@ -3542,11 +3646,62 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
           </div>
         </div>
       </motion.div>
+
+      {showDeddyModal && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-md">
+          <div className="bg-[#0b0c13] border-2 border-white/90 rounded-2xl p-8 w-[500px] shadow-2xl shadow-white/5 flex flex-col items-center">
+            
+            <div className="mb-6 rounded-xl overflow-hidden border border-gray-800">
+              <img 
+                src="image_20.png" 
+                alt="Deddy Corbuzier wants you to focus" 
+                className="w-[300px] h-[225px] object-cover" 
+              />
+            </div>
+            
+            <h3 className="text-3xl font-extrabold text-white mb-2 tracking-tighter text-center">
+              EITSS... MAU KEMANA? <span className="text-red-500">OOKE?</span>
+            </h3>
+            
+            <p className="text-gray-300 text-base mb-8 text-center px-4">
+              Data lu belum kesimpen! Sekalipun kepencet Cancel, jangan iseng pindah halaman dulu. Selesaikan data lu dulu, oke?
+            </p>
+            
+            <div className="flex justify-center gap-4 w-full">
+              <button 
+                onClick={() => setShowDeddyModal(false)}
+                className="px-6 py-3 rounded-lg text-sm font-semibold text-gray-200 bg-gray-900 border border-gray-700 hover:bg-gray-800 transition-colors flex-1"
+              >
+                Balik Ngetik (Keep Editing)
+              </button>
+              <button 
+                onClick={() => {
+                  setShowDeddyModal(false);
+                  setHasUnsavedChanges(false);
+                  onClose(); 
+                }}
+                className="px-6 py-3 rounded-lg text-sm font-bold bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-900/50 transition-colors flex-1"
+              >
+                Iya, Buang Aja (Discard Changes)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, isMobile, setProjects, setTasks }: { project: Project, tasks: Task[], onClose: () => void, onSuccess: () => void, user: any, users: AppUser[], isMobile?: boolean, setProjects: React.Dispatch<React.SetStateAction<Project[]>>, setTasks: React.Dispatch<React.SetStateAction<Task[]>> }) {
+function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, isMobile, setProjects, setTasks, setHasUnsavedChanges, hasUnsavedChanges }: { project: Project, tasks: Task[], onClose: () => void, onSuccess: () => void, user: any, users: AppUser[], isMobile?: boolean, setProjects: React.Dispatch<React.SetStateAction<Project[]>>, setTasks: React.Dispatch<React.SetStateAction<Task[]>>, setHasUnsavedChanges: (val: boolean) => void, hasUnsavedChanges: boolean }) {
+  const [showDeddyModal, setShowDeddyModal] = useState(false);
+
+  const handleAttemptClose = () => {
+    if (hasUnsavedChanges) {
+      setShowDeddyModal(true);
+    } else {
+      onClose();
+    }
+  };
   const [title, setTitle] = useState(project.project_name);
   const [pic, setPic] = useState(project.pic_name || '');
   const [ticketId, setTicketId] = useState(project.ticket_id || '');
@@ -3626,6 +3781,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
   const isAnyOverAllocated = allocationStats.some(s => s.isOver);
 
   const addPhase = () => {
+    setHasUnsavedChanges(true);
     setPhases([...phases, { 
       id: `temp-PH-${Math.random().toString(36).substring(2, 6)}`,
       custom_id: `#PH-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
@@ -3640,6 +3796,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
   };
 
   const addSubtask = (phaseIndex: number) => {
+    setHasUnsavedChanges(true);
     setPhases(prev => {
       const next = [...prev];
       const phase = { ...next[phaseIndex] };
@@ -3786,7 +3943,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
             </h2>
             <p className="text-[10px] text-[var(--text-sub)] mt-1 font-bold uppercase tracking-widest">{project.ticket_id} • {project.project_name}</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-[var(--bg-page)] rounded-full transition-colors">
+          <button onClick={handleAttemptClose} className="p-2 hover:bg-[var(--bg-page)] rounded-full transition-colors">
             <Plus className="w-5 h-5 text-[var(--text-sub)] rotate-45" />
           </button>
         </div>
@@ -3799,7 +3956,10 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
                 <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest px-1">Ticket ID</label>
                 <TicketSelector 
                   value={ticketId}
-                  onChange={(val) => setTicketId(val)}
+                  onChange={(val) => {
+                    setTicketId(val);
+                    setHasUnsavedChanges(true);
+                  }}
                   onSelectMaster={selectMasterProject}
                 />
               </div>
@@ -3808,7 +3968,10 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
                 <label className="text-[10px] font-black text-[var(--text-sub)] uppercase tracking-widest px-1">Lead PIC</label>
                 <LocalInput 
                   value={pic}
-                  onChange={v => setPic(v)}
+                  onChange={v => {
+                    setPic(v);
+                    setHasUnsavedChanges(true);
+                  }}
                   placeholder="Lead PIC Name..."
                   className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--text-main)] outline-none focus:border-blue-500 transition-all font-bold"
                 />
@@ -3838,7 +4001,10 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
               <textarea 
                 rows={2}
                 value={title}
-                onChange={e => setTitle(e.target.value)}
+                onChange={e => {
+                  setTitle(e.target.value);
+                  setHasUnsavedChanges(true);
+                }}
                 className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--text-main)] outline-none focus:border-blue-500 transition-all font-bold text-sm resize-none"
               />
             </div>
@@ -3914,6 +4080,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
                           const newPhases = [...phases];
                           newPhases[pIdx].start_date = date || '';
                           setPhases(newPhases);
+                          setHasUnsavedChanges(true);
                         }}
                       />
                     </div>
@@ -3925,6 +4092,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
                           const newPhases = [...phases];
                           newPhases[pIdx].end_date = date || '';
                           setPhases(newPhases);
+                          setHasUnsavedChanges(true);
                         }}
                       />
                     </div>
@@ -3949,6 +4117,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
                           const newPhases = [...phases];
                           newPhases[pIdx].assignee = v;
                           setPhases(newPhases);
+                          setHasUnsavedChanges(true);
                         }}
                         className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-[10px] text-[var(--text-sub)] text-center outline-none"
                       />
@@ -4127,7 +4296,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
           </p>
           <div className="flex gap-4 pointer-events-auto z-50">
             <button 
-              onClick={onClose} 
+              onClick={handleAttemptClose} 
               disabled={loading} 
               className="px-8 py-3 bg-[var(--bg-page)] text-[var(--text-sub)] font-black uppercase text-[10px] tracking-widest rounded-xl hover:bg-[var(--bg-card)] transition-all disabled:opacity-50"
             >
@@ -4148,6 +4317,48 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
           </div>
         </div>
       </motion.div>
+
+      {showDeddyModal && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-md">
+          <div className="bg-[#0b0c13] border-2 border-white/90 rounded-2xl p-8 w-[500px] shadow-2xl shadow-white/5 flex flex-col items-center">
+            
+            <div className="mb-6 rounded-xl overflow-hidden border border-gray-800">
+              <img 
+                src="image_20.png" 
+                alt="Deddy Corbuzier wants you to focus" 
+                className="w-[300px] h-[225px] object-cover" 
+              />
+            </div>
+            
+            <h3 className="text-3xl font-extrabold text-white mb-2 tracking-tighter text-center">
+              EITSS... MAU KEMANA? <span className="text-red-500">OOKE?</span>
+            </h3>
+            
+            <p className="text-gray-300 text-base mb-8 text-center px-4">
+              Data lu belum kesimpen! Sekalipun kepencet Cancel, jangan iseng pindah halaman dulu. Selesaikan data lu dulu, oke?
+            </p>
+            
+            <div className="flex justify-center gap-4 w-full">
+              <button 
+                onClick={() => setShowDeddyModal(false)}
+                className="px-6 py-3 rounded-lg text-sm font-semibold text-gray-200 bg-gray-900 border border-gray-700 hover:bg-gray-800 transition-colors flex-1"
+              >
+                Balik Ngetik (Keep Editing)
+              </button>
+              <button 
+                onClick={() => {
+                  setShowDeddyModal(false);
+                  setHasUnsavedChanges(false);
+                  onClose(); 
+                }}
+                className="px-6 py-3 rounded-lg text-sm font-bold bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-900/50 transition-colors flex-1"
+              >
+                Iya, Buang Aja (Discard Changes)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4233,7 +4444,7 @@ function BatchManualEntryModal({ onClose, onSuccess, users }: { onClose: () => v
               <Copy className="w-3 h-3 text-[var(--accent)]" /> Massive Schedule Update
             </p>
           </div>
-          <button onClick={onClose} className="p-3 hover:bg-[var(--bg-page)] rounded-2xl text-[var(--text-sub)] transition-all">
+          <button onClick={handleAttemptClose} className="p-3 hover:bg-[var(--bg-page)] rounded-2xl text-[var(--text-sub)] transition-all">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -6885,6 +7096,7 @@ function GanttDetailView({
                           onAddSubTask={handleAddInlineL2}
                           disabled={false}
                           isMobile={isMobile}
+                          setTasks={setTasks}
                         />
                       </div>
                     </div>
@@ -7966,63 +8178,160 @@ function AuditLogTable({ logs }: { logs: ProjectRescheduleLog[] }) {
   );
 }
 
-function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onToggleExpand, onUpdateTask, onOpenAudit, onAddSubTask, onDeleteTask, disabled, isMobile, revertCount }: any) {
-  
-  const renderTaskRows = (task: any, level: number = 0, index: number = 0, parentTask: any = null) => {
-    if (!task) return null;
+function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onToggleExpand, onUpdateTask, onOpenAudit, onAddSubTask, onDeleteTask, disabled, isMobile, revertCount, setTasks }: any) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+       const activeId = active.id as string;
+       const overId = over.id as string;
+       
+       const activeTask = tasks.find((t: any) => t.id === activeId);
+       if (!activeTask || !activeTask.parent_id) return;
+       
+       const parentId = activeTask.parent_id;
+
+       // Get siblings of the dragged task
+       const siblings = tasks
+         .filter((t: any) => t.parent_id === parentId)
+         .sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0));
+
+       const oldIndex = siblings.findIndex(t => t.id === activeId);
+       const newIndex = siblings.findIndex(t => t.id === overId);
+
+       if (newIndex === -1) return; // Dropped over something not a sibling
+
+       const newOrder = arrayMove(siblings, oldIndex, newIndex);
+
+       // Update all tasks locally with new sort_order for the siblings
+       const updatedTasks = tasks.map((t: any) => {
+         const moveIndex = newOrder.findIndex((no: any) => no.id === t.id);
+         if (moveIndex !== -1) {
+            return { ...t, sort_order: moveIndex };
+         }
+         return t;
+       });
+       
+       setTasks(updatedTasks);
+
+       // Silent DB sync for only the affected siblings using individual updates to avoid not-null constraint issues
+       try {
+         const updatePromises = newOrder.map((t: any, idx: number) => 
+           supabase
+             .from('tasks')
+             .update({ 
+               sort_order: idx,
+               updated_at: new Date().toISOString()
+             })
+             .eq('id', t.id)
+         );
+
+         const results = await Promise.all(updatePromises);
+         const firstError = results.find(res => res.error)?.error;
+
+         if (firstError) throw firstError;
+       } catch (err) {
+         console.error("Sort order sync failed:", err);
+         toast.error("Failed to save task order. Keeping local reorder for now.");
+       }
+    }
+  };
+
+  const SortableTaskRow = ({ task, level, index, parentTask }: any) => {
     const isExpanded = expandedRows.has(task.id);
     const children = task.children || [];
     const isProject = !!task.isProject;
     const health = getTaskHealth(task);
     const proj = projects.find((p: any) => p.id === task.project_id) || (isProject ? task : null);
     
-    // OWNERSHIP LOCK LOGIC
     const currentUser = user?.name || '';
     const projectPic = proj?.pic_name || '';
     const isAdmin = user?.access_level?.toLowerCase() === 'admin' || user?.access_level?.toLowerCase() === 'superadmin';
     const isOwner = canEditTask(currentUser, projectPic);
     const hasControl = isOwner || isAdmin;
 
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ 
+      id: task.id, 
+      disabled: level === 0 || !user || user.access_level === 'Viewer'
+    });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+      zIndex: isDragging ? 50 : 'auto',
+      position: 'relative' as any,
+    };
+
     return (
-      <React.Fragment key={`${task.id}-${index}-${revertCount}`}>
+      <React.Fragment>
         <tr 
+          ref={setNodeRef}
+          style={style}
           onClick={() => !isProject && children.length > 0 && onToggleExpand(task.id)}
           className={cn(
             "border-b border-[var(--border)] transition-all group cursor-pointer hover:bg-[var(--bg-page)] relative",
-            level === 0 ? "bg-[var(--bg-page)]/40" : "bg-[var(--bg-card)]",
+            level === 0 ? "bg-[var(--bg-page)]/40 text-sm font-black uppercase" : "bg-[var(--bg-card)]",
             level === 1 && isExpanded ? "bg-[var(--bg-page)]" : "hover:bg-[var(--bg-page)]/60",
             health === 'OVERDUE' && "border-l-4 border-l-[var(--danger)] bg-[var(--danger)]/10",
             health === 'OVER SLA' && "border-l-4 border-l-[var(--warning)] bg-[var(--warning)]/10",
-            !hasControl && "hover:bg-[var(--warning)]/5 transition-colors"
+            !hasControl && "hover:bg-[var(--warning)]/5 transition-colors",
+            isDragging && "shadow-2xl bg-indigo-500/10 z-50 ring-2 ring-indigo-500/30"
           )}
         >
-          {/* Node Selector / Title */}
-          <td className="px-6 py-4">
+          <td className="px-6 py-4 align-top">
             <div className={cn(
-              "flex items-center gap-3",
+              "flex items-start gap-3",
               level === 1 ? "pl-10" : level > 1 ? "pl-16" : "pl-0"
             )}>
+              {level === 1 && hasControl && (
+                <div 
+                  {...attributes}
+                  {...listeners}
+                  className="cursor-grab active:cursor-grabbing p-1 hover:bg-slate-800 rounded transition-colors text-slate-500 hover:text-indigo-400 z-50 shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <GripVertical className="w-3.5 h-3.5" />
+                </div>
+              )}
               {!hasControl && (
-                <div className="absolute left-1 top-1/2 -translate-y-1/2 text-amber-500/40 group-hover:text-amber-500 transition-colors" title={`Milik PIC ${proj?.pic_name}`}>
+                <div className="absolute left-1 top-4 text-amber-500/40 group-hover:text-amber-500 transition-colors" title={`Milik PIC ${proj?.pic_name}`}>
                   <ShieldAlert className="w-3 h-3" />
                 </div>
               )}
               {(isProject || children.length > 0) && (
-                <span className="text-cyan-400 font-mono w-4 flex items-center justify-center" onClick={() => onToggleExpand(task.id)}>
+                <span className="text-cyan-400 font-mono w-4 flex items-center justify-center shrink-0 mt-0.5" onClick={(e) => { e.stopPropagation(); onToggleExpand(task.id); }}>
                   {isExpanded ? "▼" : "▶"}
                 </span>
               )}
               {isProject ? (
-                <FolderKanban className="w-5 h-5 text-indigo-400" />
+                <FolderKanban className="w-5 h-5 text-indigo-400 shrink-0" />
               ) : level > 0 ? (
-                <span className="text-cyan-500 font-black text-xl select-none leading-none">↳</span>
+                <span className="text-cyan-500 font-black text-xl select-none leading-none shrink-0">↳</span>
               ) : (
-                <Layers className="w-4 h-4 text-purple-400" />
+                <Layers className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
               )}
-              <div className="flex-1 min-w-0" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-[250px] whitespace-normal break-words" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start gap-2 flex-wrap">
                   {task.custom_id && (
-                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-[var(--bg-page)] border border-[var(--border)] text-[8px] font-black text-[var(--text-sub)] font-mono tracking-tighter shadow-sm select-none">
+                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-[var(--bg-page)] border border-[var(--border)] text-[8px] font-black text-[var(--text-sub)] font-mono tracking-tighter shadow-sm select-none mt-0.5">
                       {task.custom_id}
                     </span>
                   )}
@@ -8032,16 +8341,16 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                       onChange={(v) => onUpdateTask(task.id, 'title', v)}
                       disabled={disabled}
                       className={cn(
-                        "bg-transparent border-none p-0 text-[var(--text-main)] font-semibold italic text-sm tracking-tight hover:bg-[var(--bg-page)] rounded px-2 focus:ring-1 focus:ring-[var(--accent)] min-w-[100px]",
+                        "bg-transparent border-none p-0 text-[var(--text-main)] font-semibold italic text-sm tracking-tight hover:bg-[var(--bg-page)] rounded px-2 focus:ring-1 focus:ring-[var(--accent)] min-w-[100px] whitespace-normal break-words leading-relaxed",
                         disabled && "opacity-80"
                       )}
                     />
                   ) : (
-                    <EditableInput 
+                    <DeferredTextarea 
                       value={task.title} 
                       onSave={(v) => onUpdateTask(task.id, 'title', v)}
                       className={cn(
-                        "bg-transparent outline-none border-none focus:ring-1 focus:ring-emerald-500 w-full truncate leading-relaxed",
+                        "bg-transparent outline-none border-none focus:ring-1 focus:ring-emerald-500 w-full whitespace-normal break-words leading-relaxed resize-none min-h-[1.5em]",
                         isProject ? "text-base font-bold uppercase text-[var(--text-main)] tracking-tight" : 
                         "text-[var(--text-main)] text-xs font-medium tracking-wider"
                       )}
@@ -8050,8 +8359,6 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                     />
                   )}
                   <HealthBadge health={health} />
-                  
-                  {/* Task Metadata Pills */}
                   {task.task_type && (
                     <span className={cn(
                       "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border",
@@ -8071,8 +8378,6 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                       ))}
                     </div>
                   )}
-
-                  {/* Technical Detail: Icon Info with Expansion */}
                   {task.detail_task && (
                     <div className="relative group/info">
                       <button 
@@ -8089,30 +8394,26 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                       >
                         <Info className="w-3 h-3" />
                       </button>
-                      
                       <div className="absolute bottom-full mb-2 hidden group-hover/info:block w-max max-w-xs bg-slate-900 border border-indigo-500/30 text-indigo-100 text-[10px] rounded p-2 z-[100] shadow-xl font-medium tracking-tight">
                         Click to view Full Technical Detail & Breakdown
                       </div>
                     </div>
                   )}
-
                   {(() => {
-                    const collisions = getCollision(task, tasks, projects);
                     const conflict = level > 0 && parentTask && isWBSConflict(parentTask, task);
-                    
                     return (
-                          <div className="flex items-center gap-1">
-                            {conflict && (
-                              <div className="relative group/conflict inline-flex items-center justify-center ml-1">
-                                <div className="text-amber-500 animate-pulse cursor-help">
-                                  <AlertTriangle className="w-4 h-4" />
-                                </div>
-                                <div className="absolute bottom-full mb-2 hidden group-hover/conflict:block w-max max-w-xs bg-slate-900 border border-amber-500/30 text-amber-200 text-[9px] rounded p-2 z-[100] shadow-xl font-bold uppercase tracking-widest leading-tight">
-                                  OUTSIDE PARENT RANGE: Tanggal di luar jadwal task utama!
-                                </div>
+                        <div className="flex items-center gap-1">
+                          {conflict && (
+                            <div className="relative group/conflict inline-flex items-center justify-center ml-1">
+                              <div className="text-amber-500 animate-pulse cursor-help">
+                                <AlertTriangle className="w-4 h-4" />
                               </div>
-                            )}
-                          </div>
+                              <div className="absolute bottom-full mb-2 hidden group-hover/conflict:block w-max max-w-xs bg-slate-900 border border-amber-500/30 text-amber-200 text-[9px] rounded p-2 z-[100] shadow-xl font-bold uppercase tracking-widest leading-tight">
+                                OUTSIDE PARENT RANGE: Tanggal di luar jadwal task utama!
+                              </div>
+                            </div>
+                          )}
+                        </div>
                     );
                   })()}
                 </div>
@@ -8130,9 +8431,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               </div>
             </div>
           </td>
-
-          {/* Man-Hours */}
-          <td className="px-2 py-4 text-center">
+          <td className="px-2 py-4 text-center align-top">
              <div className="flex flex-col items-center gap-1" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center gap-1">
                   <EditableInput 
@@ -8149,9 +8448,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                 </div>
              </div>
           </td>
-
-          {/* Assignee */}
-          <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+          <td className="px-4 py-4 align-top" onClick={e => e.stopPropagation()}>
             <EditableInput 
               value={task.assignee || ''} 
               onSave={(v) => onUpdateTask(task.id, 'assignee', v)}
@@ -8160,9 +8457,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               disabled={disabled}
             />
           </td>
-
-          {/* Realized Finish Date */}
-          <td className="px-4 py-4 bg-[var(--accent)]/5" onClick={e => e.stopPropagation()}>
+          <td className="px-4 py-4 bg-[var(--accent)]/5 align-top" onClick={e => e.stopPropagation()}>
             <CustomDatePicker 
               selectedDate={task.realized_finish_date ? format(new Date(task.realized_finish_date), 'yyyy-MM-dd') : ''}
               onChange={(date) => {
@@ -8173,9 +8468,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               disabled={disabled}
             />
           </td>
-
-          {/* Dev */}
-          <td className="px-2 py-4" onClick={e => e.stopPropagation()}>
+          <td className="px-2 py-4 align-top" onClick={e => e.stopPropagation()}>
             {level > 0 && (
               <EditableInput 
                 value={task.dev_name || ''} 
@@ -8187,9 +8480,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               />
             )}
           </td>
-
-          {/* QA */}
-          <td className="px-2 py-4" onClick={e => e.stopPropagation()}>
+          <td className="px-2 py-4 align-top" onClick={e => e.stopPropagation()}>
             {level > 0 && (
               <EditableInput 
                 value={task.qa_name || ''} 
@@ -8201,15 +8492,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               />
             )}
           </td>
-
-          {/* Dates */}
-          <td 
-            className="px-1 py-4 text-center cursor-pointer hover:bg-[var(--bg-card)] transition-all group/date relative" 
-            onClick={(e) => { 
-              if (disabled) return;
-              e.stopPropagation(); 
-            }}
-          >
+          <td className="px-1 py-4 text-center cursor-pointer hover:bg-[var(--bg-card)] transition-all group/date relative align-top" onClick={e => e.stopPropagation()}>
             <div className="flex flex-col items-center">
               <CustomDatePicker 
                 selectedDate={task.start_time ? format(new Date(task.start_time), "yyyy-MM-dd") : ''}
@@ -8224,14 +8507,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               <span className="text-[7px] text-[var(--accent)] font-black uppercase opacity-0 group-hover/date:opacity-100 transition-all absolute -top-1">Start</span>
             </div>
           </td>
-
-          <td 
-            className="px-1 py-4 text-center cursor-pointer hover:bg-[var(--bg-card)] transition-all group/date relative" 
-            onClick={(e) => { 
-              if (disabled) return;
-              e.stopPropagation(); 
-            }}
-          >
+          <td className="px-1 py-4 text-center cursor-pointer hover:bg-[var(--bg-card)] transition-all group/date relative align-top" onClick={e => e.stopPropagation()}>
             <div className="flex flex-col items-center">
               <CustomDatePicker 
                 selectedDate={task.end_time ? format(new Date(task.end_time), "yyyy-MM-dd") : ''}
@@ -8246,9 +8522,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               <span className="text-[7px] text-[var(--accent)] font-black uppercase opacity-0 group-hover/date:opacity-100 transition-all absolute -top-1">End</span>
             </div>
           </td>
-
-          {/* Status */}
-          <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+          <td className="px-4 py-4 align-top" onClick={e => e.stopPropagation()}>
             <div className="flex justify-center">
               <TaskStatusSelector 
                 status={task.status || TaskStatus.TODO} 
@@ -8257,9 +8531,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
               />
             </div>
           </td>
-
-          {/* Fachrul Feedback */}
-          <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+          <td className="px-4 py-4 align-top" onClick={e => e.stopPropagation()}>
              <div className="flex items-center gap-1.5 px-2 py-1.5 bg-[var(--bg-page)]/50 rounded-lg border border-[var(--border)] group-hover:border-[var(--accent)]/30 transition-colors">
                 <div className="flex flex-col gap-0.5 min-w-[50px]">
                    <ApprovalBadge value={task.approval_fachrul} label="Fachrul" onUpdate={(v) => onUpdateTask(task.id, 'approval_fachrul', v)} disabled={disabled} />
@@ -8268,15 +8540,13 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                    value={task.suggestion_fachrul || ''}
                    onSave={(v) => onUpdateTask(task.id, 'suggestion_fachrul', v)}
                    debounceMs={500}
-                   className="bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] text-[var(--text-main)] focus:ring-1 focus:ring-[var(--accent)] outline-none w-full min-h-[32px] max-h-[32px] resize-none scrollbar-hide font-medium"
+                   className="bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] text-[var(--text-main)] focus:ring-1 focus:ring-[var(--accent)] outline-none w-full min-h-[32px] resize-none scrollbar-hide font-medium"
                    placeholder="..."
                    disabled={disabled}
                 />
              </div>
           </td>
-
-          {/* Barra Feedback */}
-          <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+          <td className="px-4 py-4 align-top" onClick={e => e.stopPropagation()}>
              <div className="flex items-center gap-1.5 px-2 py-1.5 bg-[var(--bg-page)]/50 rounded-lg border border-[var(--border)] group-hover:border-[var(--accent)]/30 transition-colors">
                 <div className="flex flex-col gap-0.5 min-w-[50px]">
                    <ApprovalBadge value={task.approval_barra} label="Barra" onUpdate={(v) => onUpdateTask(task.id, 'approval_barra', v)} disabled={disabled} />
@@ -8285,15 +8555,13 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                    value={task.suggestion_barra || ''}
                    onSave={(v) => onUpdateTask(task.id, 'suggestion_barra', v)}
                    debounceMs={500}
-                   className="bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] text-[var(--text-main)] focus:ring-1 focus:ring-[var(--accent)] outline-none w-full min-h-[32px] max-h-[32px] resize-none scrollbar-hide font-medium"
+                   className="bg-[var(--bg-page)] border border-[var(--border)] rounded px-2 py-1 text-[9px] text-[var(--text-main)] focus:ring-1 focus:ring-[var(--accent)] outline-none w-full min-h-[32px] resize-none scrollbar-hide font-medium"
                    placeholder="..."
                    disabled={disabled}
                 />
              </div>
           </td>
-
-          {/* Hidden Actions Column if needed, or just combine in list */}
-          <td className="px-6 py-4 text-right">
+          <td className="px-6 py-4 text-right align-top">
             <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
               {!isProject && level === 0 && user && (
                 <button 
@@ -8321,7 +8589,6 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
           </td>
         </tr>
         
-        {/* Keterangan & Technical Detail Expansion Row */}
         <AnimatePresence>
           {expandedRows.has(`info-${task.id}`) && (
             <motion.tr 
@@ -8347,67 +8614,109 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
             </motion.tr>
           )}
         </AnimatePresence>
+      </React.Fragment>
+    );
+  };
+
+  const renderTaskRows = (task: any, level: number = 0, index: number = 0, parentTask: any = null) => {
+    if (!task) return null;
+    const isExpanded = expandedRows.has(task.id);
+    const children = task.children || [];
+    
+    // THE "REORDER" FIX: Always sort children by sort_order for consistent display
+    const sortedChildren = [...children].sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0));
+
+    return (
+      <React.Fragment key={`${task.id}-${index}-${revertCount}`}>
+        <SortableTaskRow 
+          task={task} 
+          level={level} 
+          index={index} 
+          parentTask={parentTask} 
+        />
         
-        {isExpanded && (() => {
-          const uniqueChildren = (children || []).filter((v: any, i: number, a: any[]) => !!v && a.findIndex(t => t.id === v.id) === i);
-          return uniqueChildren.map((sub: any, sidx: number) => (
-            <React.Fragment key={`${sub.custom_id || sub.id}-${sidx}`}>
-              {renderTaskRows(sub, level + 1, sidx, task)}
-            </React.Fragment>
-          ));
+        {isExpanded && sortedChildren.length > 0 && (() => {
+          // Unique children guard
+          const uniqueChildren = sortedChildren.filter((v: any, i: number, a: any[]) => !!v && a.findIndex(t => t.id === v.id) === i);
+          
+          if (level === 0) {
+            // L2 children of an L1 parent get a SortableContext for reordering
+            return (
+              <SortableContext items={uniqueChildren.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                {uniqueChildren.map((sub: any, sidx: number) => (
+                  <React.Fragment key={`${sub.id}-${sidx}`}>
+                    {renderTaskRows(sub, level + 1, sidx, task)}
+                  </React.Fragment>
+                ))}
+              </SortableContext>
+            );
+          } else {
+            // L3+ children just render normally (reordering not requested for deeper levels)
+            return uniqueChildren.map((sub: any, sidx: number) => (
+              <React.Fragment key={`${sub.id}-${sidx}`}>
+                {renderTaskRows(sub, level + 1, sidx, task)}
+              </React.Fragment>
+            ));
+          }
         })()}
       </React.Fragment>
     );
   };
 
   return (
-    <div className="overflow-x-auto w-full scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-      <table className={cn("w-full text-left border-collapse", isMobile ? "min-w-[1000px]" : "min-w-[1600px]")}>
-        <thead className="sticky top-0 z-40 bg-[var(--bg-page)] border-b border-[var(--border)]">
-          <tr className="shadow-sm">
-            <th className="px-6 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-[0.2em] min-w-[300px]">Hierarchy & Governance</th>
-            <th className="px-2 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest text-center w-24">Man-Hours</th>
-            <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-40 text-center">PIC</th>
-            <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-32 text-center bg-blue-500/5">Realized Finish</th>
-            <th className="px-2 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">Dev</th>
-            <th className="px-2 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">QA</th>
-            <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">Start</th>
-            <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">End</th>
-            <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-32 text-center">Status</th>
-            <th className="px-4 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest w-[250px]"><div className="flex items-center justify-center gap-1"><UserIcon className="w-2.5 h-2.5"/> Fachrul Feedback</div></th>
-            <th className="px-4 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest w-[250px]"><div className="flex items-center justify-center gap-1"><UserIcon className="w-2.5 h-2.5"/> Barra Feedback</div></th>
-            <th className="px-6 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-40 text-right">Comm Ops</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-white/5">
-          {(() => {
-            // THE "TERMINATOR" FIX: Unique Task Guard
-            const uniqueRoots = (roots || []).filter((v, i, a) => !!v && a.findIndex(t => t.id === v.id) === i);
-            if (uniqueRoots.length === 0) {
-              return (
-                <tr>
-                  <td colSpan={12} className="py-10 text-center">
-                    <div className="flex flex-col items-center justify-center space-y-4">
-                      <div className="w-12 h-12 bg-slate-900/50 rounded-xl flex items-center justify-center border border-slate-800">
-                        <Layers className="w-6 h-6 text-slate-700" />
+    <DndContext 
+      sensors={sensors} 
+      collisionDetection={closestCenter} 
+      onDragEnd={handleDragEnd}
+      modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
+    >
+      <div className="overflow-x-auto w-full scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+        <table className={cn("w-full text-left border-collapse", isMobile ? "min-w-[1000px]" : "min-w-[1600px]")}>
+          <thead className="sticky top-0 z-40 bg-[var(--bg-page)] border-b border-[var(--border)]">
+            <tr className="shadow-sm">
+              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-[0.2em] min-w-[300px]">Hierarchy & Governance</th>
+              <th className="px-2 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest text-center w-24">Man-Hours</th>
+              <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-40 text-center">PIC</th>
+              <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-32 text-center bg-blue-500/5">Realized Finish</th>
+              <th className="px-2 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">Dev</th>
+              <th className="px-2 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">QA</th>
+              <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">Start</th>
+              <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">End</th>
+              <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-32 text-center">Status</th>
+              <th className="px-4 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest w-[250px]"><div className="flex items-center justify-center gap-1"><UserIcon className="w-2.5 h-2.5"/> Fachrul Feedback</div></th>
+              <th className="px-4 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest w-[250px]"><div className="flex items-center justify-center gap-1"><UserIcon className="w-2.5 h-2.5"/> Barra Feedback</div></th>
+              <th className="px-6 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-40 text-right">Comm Ops</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {(() => {
+              const uniqueRoots = (roots || []).filter((v: any, i: number, a: any[]) => !!v && a.findIndex(t => t.id === v.id) === i);
+              if (uniqueRoots.length === 0) {
+                return (
+                  <tr>
+                    <td colSpan={12} className="py-10 text-center">
+                      <div className="flex flex-col items-center justify-center space-y-4">
+                        <div className="w-12 h-12 bg-slate-900/50 rounded-xl flex items-center justify-center border border-slate-800">
+                          <Layers className="w-6 h-6 text-slate-700" />
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-slate-300 font-bold text-sm">No Governance Nodes Found</h4>
+                          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em]">Project scope is currently undefined</p>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <h4 className="text-slate-300 font-bold text-sm">No Governance Nodes Found</h4>
-                        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em]">Project scope is currently undefined</p>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              );
-            }
-            return uniqueRoots.map((task: any, idx: number) => {
-              const combinedKey = `${task.id}-${revertCount}-${idx}`;
-              return <React.Fragment key={combinedKey}>{renderTaskRows(task, 0, idx, null)}</React.Fragment>;
-            });
-          })()}
-        </tbody>
-      </table>
-    </div>
+                    </td>
+                  </tr>
+                );
+              }
+              return uniqueRoots.map((task: any, idx: number) => {
+                const combinedKey = `${task.id}-${revertCount}-${idx}`;
+                return <React.Fragment key={combinedKey}>{renderTaskRows(task, 0, idx, null)}</React.Fragment>;
+              });
+            })()}
+          </tbody>
+        </table>
+      </div>
+    </DndContext>
   );
 }
 

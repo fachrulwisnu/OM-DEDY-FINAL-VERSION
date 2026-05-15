@@ -82,6 +82,7 @@ export interface Task {
   created_at: string;
   updated_at: string;
   level?: number;
+  sort_order?: number;
   realized_finish_date?: string | null;
   is_manual_override?: boolean;
   current_status?: string;

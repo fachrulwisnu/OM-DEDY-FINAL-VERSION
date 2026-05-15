@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { getEnv } from '../src/config/env';
 
+export const maxDuration = 60; // Allow function to run up to 60 seconds
+
 const supabaseUrl = getEnv('VITE_SUPABASE_URL') || '';
 const supabaseKey = getEnv('SUPABASE_SERVICE_ROLE_KEY') || getEnv('VITE_SUPABASE_ANON_KEY') || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -225,17 +227,31 @@ export default async function handler(req: any, res: any) {
     });
 
     if (deduplicatedData.length > 0) {
-      const { error } = await supabase
-        .from('notion_api_projects')
-        .upsert(deduplicatedData, { 
-          onConflict: 'ticket_id',
-          ignoreDuplicates: false
-        });
+      const CHUNK_SIZE = 50;
+      let totalUpserted = 0;
+      
+      logs.push(`Starting batch upsert for ${deduplicatedData.length} records in chunks of ${CHUNK_SIZE}...`);
 
-      if (error) {
-        console.error("Supabase Upsert Error:", error);
-        throw new Error(`Supabase Sync failed: ${error.message}`);
+      for (let i = 0; i < deduplicatedData.length; i += CHUNK_SIZE) {
+        const chunk = deduplicatedData.slice(i, i + CHUNK_SIZE);
+        
+        const { error } = await supabase
+          .from('notion_api_projects')
+          .upsert(chunk, { 
+            onConflict: 'ticket_id',
+            ignoreDuplicates: false
+          });
+
+        if (error) {
+          console.error(`Error in chunk ${i / CHUNK_SIZE + 1}:`, error);
+          throw new Error(`Supabase Sync failed at chunk ${i / CHUNK_SIZE + 1}: ${error.message}`);
+        }
+
+        totalUpserted += chunk.length;
+        console.log(`Successfully synced chunk ${i / CHUNK_SIZE + 1} (${totalUpserted}/${deduplicatedData.length})`);
       }
+      
+      logs.push(`All ${deduplicatedData.length} records synced successfully via batches.`);
     }
 
     return res.status(200).json({ 
