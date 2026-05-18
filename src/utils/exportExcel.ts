@@ -120,25 +120,31 @@ export const exportToExcel = async (
 
     // INJECT L1 PHASE SUBTOTAL ROW (Renamed Label to DAYS)
     const safePhaseName = (phase.title || phase.name || 'PHASE').toUpperCase();
-    aoa.push([
-      project.project_name || project.name || '-', 
-      phase.title || phase.name || '-', 
-      `TOTAL ${safePhaseName} DAYS :`, // In Task Column (Index 2)
-      "", "", "", // Empty Type, Components, Detail
-      formatDays(phaseTotalHours, pType), // Uses exact L1 input
-      `${Math.round(phaseTotalHours * 60)} Mins`, 
-      "", "", "", "", ""
-    ]);
     
-    // Merge Subtotal Label across columns C, D, E, F (Index 2 to 5)
-    merges.push({ s: { r: currentRow, c: 2 }, e: { r: currentRow, c: 5 } });
-    currentRow++;
-
-    // Merge L1 and Project Name vertically across all tasks + the subtotal row
-    if (currentRow - startRow > 1) {
+    // Vertical merges for tasks ONLY (Exclude subtotal row)
+    if (currentRow > startRow) {
       merges.push({ s: { r: startRow, c: 1 }, e: { r: currentRow - 1, c: 1 } }); 
       merges.push({ s: { r: startRow, c: 0 }, e: { r: currentRow - 1, c: 0 } }); 
     }
+
+    // TASK 1: FIX THE ARRAY OF ARRAYS (AOA) DATA PADDING
+    const totalRowData = [
+      project.project_name || project.name || '-', // Column A (0) - Project Name
+      phase.title || phase.name || '-',            // Column B (1) - Phase L1
+      `TOTAL ${safePhaseName} DAYS :`,             // Column C (2) - Start of Merge Title
+      "",                                          // Column D (3) - Padding
+      "",                                          // Column E (4) - Padding
+      "",                                          // Column F (5) - Padding (End of Merge Title)
+      formatDays(phaseTotalHours, pType),          // Column G (6) - EXACTLY under "Man Hours"
+      `${Math.round(phaseTotalHours * 60)} Mins`,  // Column H (7) - EXACTLY under "Man Hours (In Minutes)"
+      "", "", "", "", ""                           // Padding for remaining columns
+    ];
+    aoa.push(totalRowData);
+    
+    // TASK 2: REFIX THE MERGE RANGE SPECIFICALLY FROM C TO F
+    // Merge Subtotal Label across columns C, D, E, F (Index 2 to 5)
+    merges.push({ s: { r: currentRow, c: 2 }, e: { r: currentRow, c: 5 } });
+    currentRow++;
   });
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
