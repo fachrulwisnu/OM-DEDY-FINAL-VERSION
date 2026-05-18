@@ -89,11 +89,11 @@ export const exportToExcel = async (
   let currentRow = 11; 
 
   sortedPhases.forEach((phase) => {
-    const rawTasks = phase.children && phase.children.length > 0 ? phase.children : [{}];
+    const rawTasks = (phase.children && phase.children.length > 0) ? phase.children : [{}];
     const sortedTasks = safeSortData(rawTasks); 
     const startRow = currentRow; 
     
-    // Use L1's actual hours for the subtotal
+    // Use phase hours for total
     const phaseTotalHours = parseFloat(phase.man_hours) || 0; 
 
     sortedTasks.forEach((task: any) => {
@@ -118,44 +118,34 @@ export const exportToExcel = async (
       currentRow++;
     });
 
-    // INJECT L1 PHASE SUBTOTAL ROW (Renamed Label to DAYS)
     const safePhaseName = (phase.title || phase.name || 'PHASE').toUpperCase();
     
-    // Vertical merges for tasks ONLY (Exclude subtotal row)
-    if (currentRow > startRow) {
-      merges.push({ s: { r: startRow, c: 1 }, e: { r: currentRow - 1, c: 1 } }); 
-      merges.push({ s: { r: startRow, c: 0 }, e: { r: currentRow - 1, c: 0 } }); 
-    }
-
-    // TASK 1: FIX THE ARRAY OF ARRAYS (AOA) DATA PADDING
+    // Total row construction
     const totalRowData = [
-      project.project_name || project.name || '-', // Column A (0) - Project Name
-      phase.title || phase.name || '-',            // Column B (1) - Phase L1
-      `TOTAL ${safePhaseName} DAYS :`,             // Column C (2) - Start of Merge Title
-      "",                                          // Column D (3) - Padding
-      "",                                          // Column E (4) - Padding
-      "",                                          // Column F (5) - Padding (End of Merge Title)
-      formatDays(phaseTotalHours, pType),          // Column G (6) - EXACTLY under "Man Hours"
-      `${Math.round(phaseTotalHours * 60)} Mins`,  // Column H (7) - EXACTLY under "Man Hours (In Minutes)"
-      "", "", "", "", ""                           // Padding for remaining columns
+      project.project_name || project.name || '-', // Column A
+      phase.title || phase.name || '-',            // Column B
+      `TOTAL ${safePhaseName} DAYS :`,             // Column C (Start of Merge)
+      "", "", "",                                  // D, E, F (Padding)
+      formatDays(phaseTotalHours, pType),          // Column G
+      `${Math.round(phaseTotalHours * 60)} Mins`,  // Column H
+      "", "", "", "", ""                           // Remaining
     ];
     aoa.push(totalRowData);
     
-    // TASK 2: REFIX THE MERGE RANGE SPECIFICALLY FROM C TO F
-    // Merge Subtotal Label across columns C, D, E, F (Index 2 to 5)
+    // RESTORED: Dynamic vertical merge for Project Name & Phase L1 across TASKS ONLY
+    if (currentRow > startRow) {
+      merges.push({ s: { r: startRow, c: 0 }, e: { r: currentRow - 1, c: 0 } });
+      merges.push({ s: { r: startRow, c: 1 }, e: { r: currentRow - 1, c: 1 } });
+    }
+
+    // Horizontal merge for the total title (C to F)
     merges.push({ s: { r: currentRow, c: 2 }, e: { r: currentRow, c: 5 } });
+    
     currentRow++;
   });
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = merges;
-
-  // Set Column Widths
-  ws['!cols'] = [
-    { wch: 25 }, { wch: 15 }, { wch: 45 }, { wch: 15 }, { wch: 25 }, 
-    { wch: 65 }, { wch: 18 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, 
-    { wch: 15 }, { wch: 35 }, { wch: 35 }
-  ];
 
   // Borders and Formatting Styles
   const borderDef = {
@@ -226,13 +216,42 @@ export const exportToExcel = async (
     }
   }
 
+  // 1. SAFE COLUMN WIDTHS
+  ws['!cols'] = [
+    { wch: 25 }, // A: Project Name
+    { wch: 12 }, // B: Phase
+    { wch: 38 }, // C: Task
+    { wch: 16 }, // D: Type
+    { wch: 15 }, // E: Components
+    { wch: 55 }, // F: Detail
+    { wch: 24 }, // G: Man Hours (Wide enough for "X Days, Y Hours...")
+    { wch: 22 }, // H: Man Hours Minutes
+    { wch: 15 }, // I: Start Date
+    { wch: 15 }  // J: End Date
+  ];
+
+  // 2. SAFE ROW HEIGHTS FOR TOTALS
+  ws['!rows'] = ws['!rows'] || [];
+  const rangeHeights = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  for (let R = rangeHeights.s.r; R <= rangeHeights.e.r; ++R) {
+    const cellC = ws[XLSX.utils.encode_cell({ r: R, c: 2 })];
+    const cellB = ws[XLSX.utils.encode_cell({ r: R, c: 1 })];
+    
+    // If it's a TOTAL row, give it extra height so it doesn't get cut off in M365
+    if ((cellC && cellC.v && String(cellC.v).includes("TOTAL")) || 
+        (cellB && cellB.v && String(cellB.v).includes("TOTAL"))) {
+      ws['!rows'][R] = { hpt: 30 }; // Extra height for totals
+    } else {
+      ws['!rows'][R] = { hpt: 20 }; // Standard height
+    }
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
   
-  // NEW LOGIC: Convert to Base64 and send to Backend
   const excelBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-  const filename = `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}_${Date.now()}.xlsx`;
-  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'; // Fallback for local testing
+  const filename = `OM_DEDY_Timeline_${project.name || 'Project'}_${Date.now()}.xlsx`;
+  const backendUrl = import.meta.env.VITE_API_BASE_URL;
 
   try {
     setIsExcelLoading(true);
@@ -244,7 +263,6 @@ export const exportToExcel = async (
 
     const result = await response.json();
     if (result.success && result.embedUrl) {
-      // FIX: Safely open the M365 Excel link in a new browser tab
       window.open(result.embedUrl, '_blank', 'noopener,noreferrer');
     } else {
       alert("Gagal memuat Excel dari Microsoft 365.");
