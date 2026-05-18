@@ -6,7 +6,12 @@ import * as XLSX from 'xlsx-js-style';
  * UPDATED: Calculate True Totals strictly from L1 PHASE inputs to respect SPARE time overrides
  * UPDATED: Minute-based precision for Days calculation
  */
-export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
+export const exportToExcel = async (
+  project: any, 
+  hierarchicalPhases: any[],
+  setIsExcelLoading: (loading: boolean) => void,
+  setExcelEmbedUrl: (url: string | null) => void
+) => {
   if (!project || !hierarchicalPhases) {
     console.error("Export failed: Missing project or phases data");
     return;
@@ -219,15 +224,29 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
   
-  // Custom Buffer write for Vite safety
-  const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = window.URL.createObjectURL(data);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}.xlsx`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
+  // NEW LOGIC: Convert to Base64 and send to Backend
+  const excelBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+  const filename = `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}_${Date.now()}.xlsx`;
+  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'; // Fallback for local testing
+
+  try {
+    setIsExcelLoading(true);
+    const response = await fetch(`${backendUrl}/api/m365/upload-excel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, excelBase64 })
+    });
+
+    const result = await response.json();
+    if (result.success && result.embedUrl) {
+      setExcelEmbedUrl(result.embedUrl);
+    } else {
+      alert("Gagal memuat Excel dari Microsoft 365.");
+    }
+  } catch (error) {
+    console.error("Integration Error:", error);
+    alert("Terjadi kesalahan jaringan ke Backend M365.");
+  } finally {
+    setIsExcelLoading(false);
+  }
 };

@@ -7102,6 +7102,8 @@ function GanttDetailView({
   }, [projectId, navigate, authLoading, isGlobalView]);
 
   const [activeView, setActiveView] = useState<'INFRASTRUCTURE' | 'SYSTEM_LOG' | 'HISTORY_EDIT'>('INFRASTRUCTURE');
+  const [isExcelLoading, setIsExcelLoading] = useState(false);
+  const [excelEmbedUrl, setExcelEmbedUrl] = useState<string | null>(null);
   const [rescheduleLogs, setRescheduleLogs] = useState<ProjectRescheduleLog[]>([]);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   
@@ -7470,11 +7472,11 @@ function GanttDetailView({
     return { roots, map };
   }, [filteredTasks, isGlobalView, projects, tasks]);
 
-  const handleExportWBS = () => {
+  const exportToExcelAction = async () => {
     if (!currentProject) return;
     
     // Pass the hierarchical project tree roots to the new export utility
-    exportToExcel(currentProject, projectTree.roots);
+    await exportToExcel(currentProject, projectTree.roots, setIsExcelLoading, setExcelEmbedUrl);
   };
 
   if (!projectTree || !projectTree.roots || (projectTree.roots.length === 0 && !isGlobalView)) {
@@ -7667,21 +7669,9 @@ function GanttDetailView({
                                </button>
                              )}
                              {user && (
-                               <button 
-                                 onClick={handleExportWBS}
-                                 className="flex items-center gap-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white font-bold text-[9px] uppercase tracking-wider px-4 py-2 rounded-lg shadow-md hover:shadow-emerald-900/30 active:scale-95 transition-all outline-none border border-emerald-500/20"
-                               >
-                                 <svg 
-                                   xmlns="http://www.w3.org/2000/svg" 
-                                   fill="none" 
-                                   viewBox="0 0 24 24" 
-                                   strokeWidth={2.5} 
-                                   stroke="currentColor" 
-                                   className="w-3.5 h-3.5 text-emerald-100"
-                                 >
-                                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                                 </svg>
-                                 <span>Export Detail Timeline (.xlsx)</span>
+                               <button onClick={exportToExcelAction} disabled={isExcelLoading} className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50">
+                                 {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
+                                 <span>{isExcelLoading ? "Menghubungkan ke M365..." : "Buka & Edit di Excel Online"}</span>
                                </button>
                              )}
                            </div>
@@ -7847,6 +7837,25 @@ function GanttDetailView({
              </div>
            </div>
          </div>
+        {excelEmbedUrl && (
+          <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 md:p-8">
+            <div className="bg-[#0b0c13] w-full h-full max-w-7xl rounded-2xl border border-gray-700 shadow-2xl flex flex-col overflow-hidden">
+              <div className="flex justify-between items-center px-6 py-4 bg-gray-900 border-b border-gray-800">
+                <div className="flex items-center gap-3">
+                  <span className="bg-blue-600 p-1.5 rounded-md text-white">📊</span>
+                  <div>
+                    <h3 className="text-white font-bold">Live Excel Collaboration (M365)</h3>
+                    <p className="text-gray-400 text-xs">Perubahan otomatis tersimpan ke Cloud.</p>
+                  </div>
+                </div>
+                <button onClick={() => setExcelEmbedUrl(null)} className="text-gray-400 hover:text-white bg-gray-800 hover:bg-red-600 p-2 rounded-lg transition-colors">Tutup Editor</button>
+              </div>
+              <div className="flex-1 w-full bg-white">
+                <iframe src={excelEmbedUrl} width="100%" height="100%" frameBorder="0" scrolling="no" allowFullScreen title="M365 Editor"></iframe>
+              </div>
+            </div>
+          </div>
+        )}
        </motion.div>
        </AnimatePresence>
     </div>
