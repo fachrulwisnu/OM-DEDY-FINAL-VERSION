@@ -7592,10 +7592,19 @@ function GanttDetailView({
                              {user && (
                                <button 
                                  onClick={handleExportWBS}
-                                 className="bg-indigo-50 dark:bg-indigo-600/10 hover:bg-indigo-100 dark:hover:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 p-2 rounded-lg border border-indigo-200 dark:border-indigo-500/20 transition-all shadow-sm dark:shadow-none"
-                                 title="Export to Excel"
+                                 className="flex items-center gap-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white font-bold text-[9px] uppercase tracking-wider px-4 py-2 rounded-lg shadow-md hover:shadow-emerald-900/30 active:scale-95 transition-all outline-none border border-emerald-500/20"
                                >
-                                 <Download className="w-3.5 h-3.5" />
+                                 <svg 
+                                   xmlns="http://www.w3.org/2000/svg" 
+                                   fill="none" 
+                                   viewBox="0 0 24 24" 
+                                   strokeWidth={2.5} 
+                                   stroke="currentColor" 
+                                   className="w-3.5 h-3.5 text-emerald-100"
+                                 >
+                                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                 </svg>
+                                 <span>Export Detail Timeline (.xlsx)</span>
                                </button>
                              )}
                            </div>
@@ -7613,13 +7622,6 @@ function GanttDetailView({
                     >
                       <Edit3 className="w-4 h-4" />
                       Edit Breakdown Timeline
-                    </button>
-                    <button 
-                      onClick={handleAddInlineL1}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-2 border border-indigo-400/30"
-                    >
-                      <Plus className="w-4 h-4" />
-                      + Add New Phase (L1)
                     </button>
                   </div>
                 )}

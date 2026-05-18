@@ -1,9 +1,9 @@
 import * as XLSX from 'xlsx-js-style';
-import { format } from 'date-fns';
 
 /**
  * Enhanced export utility for Om Dedy Dashboard
  * Generates an EXACT layout using AOA and xlsx-js-style
+ * Includes Safe Sorting Layer and Subtotal Mandays per Phase
  */
 export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
   if (!project || !hierarchicalPhases) {
@@ -11,13 +11,28 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
     return;
   }
 
-  // 1. New Clean Date Formatter Utility
+  // 1. Safe Sort Helper to handle Drag-and-Drop Order
+  const safeSortData = (arr: any[]) => {
+    if (!arr || !Array.isArray(arr)) return [];
+    return [...arr].sort((a, b) => {
+      const getVal = (item: any) => {
+        if (item.sequence !== undefined && item.sequence !== null) return item.sequence;
+        if (item.sort_order !== undefined && item.sort_order !== null) return item.sort_order;
+        if (item.index !== undefined && item.index !== null) return item.index;
+        if (item.position !== undefined && item.position !== null) return item.position;
+        if (item.order !== undefined && item.order !== null) return item.order;
+        return 0; 
+      };
+      return (getVal(a) || 0) - (getVal(b) || 0);
+    });
+  };
+
+  // 2. Clean Date Formatter Utility
   const formatDate = (dateStr: any) => {
     if (!dateStr || dateStr === '-') return '-';
     try {
       const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr; // Return as-is if already formatted
-      
+      if (isNaN(date.getTime())) return dateStr; 
       const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
     } catch (e) {
@@ -25,7 +40,7 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
     }
   };
 
-  // 2. Man Days Formatter (9 Hours = 1 Day Rule)
+  // 3. Man Days Formatter (9 Hours = 1 Day Rule)
   const formatManDays = (totalHours: number) => {
     if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
     const days = Math.floor(totalHours / 9); 
@@ -35,12 +50,13 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
   };
 
   let fsdHours = 0, devHours = 0, sitHours = 0;
-  const phasesList = hierarchicalPhases || [];
+  // APPLY SORTING TO PHASES
+  const sortedPhases = safeSortData(hierarchicalPhases);
 
-  // Calculate True Total Hours from L2 Tasks Only
-  phasesList.forEach((phase) => {
+  // First Pass: Calculate Global Hours from Sorted L2 Tasks Only
+  sortedPhases.forEach((phase) => {
     const phaseName = (phase.title || phase.name || '').toUpperCase();
-    const tasks = phase.children || phase.tasks || [];
+    const tasks = safeSortData(phase.children || phase.tasks || []);
     
     tasks.forEach((task: any) => {
       const hours = parseFloat(task.man_hours || task.hours) || 0;
@@ -52,39 +68,40 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
 
   const trueTotalHours = fsdHours + devHours + sitHours;
 
-  // 3. Build Sheet Matrix (AOA) with Formatted Dates
+  // 4. Build Sheet Matrix (AOA) with Formatted Dates
   const aoa: any[][] = [
-    [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], // Row 1 (Index 0)
-    [], // Row 2 (Index 1)
-    [`Project Name`, project.project_name || project.name || '-', ``, `Global Status`, project.status || 'TODO'], // Row 3
-    [`Start Date`, formatDate(project.start_date), ``, `Total Man Hours`, `${trueTotalHours} Hours`], // Row 4 (FORMATTED)
-    [`End Date`, formatDate(project.end_date), ``, `PIC`, project.pic_name || project.pic || '-'], // Row 5 (FORMATTED)
-    [], // Row 6
-    [`Total Man days FSD:`, formatManDays(fsdHours)], // Row 7
-    [`Total Man days DEV:`, formatManDays(devHours)], // Row 8
-    [`Total Man days SIT:`, formatManDays(sitHours)], // Row 9
-    [], // Row 10
-    [ // Row 11 (Index 10): MAIN TABLE HEADERS
+    [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], 
+    [], 
+    [`Project Name`, project.project_name || project.name || '-', ``, `Global Status`, project.status || 'TODO'], 
+    [`Start Date`, formatDate(project.start_date), ``, `Total Man Hours`, `${trueTotalHours} Hours`], 
+    [`End Date`, formatDate(project.end_date), ``, `PIC`, project.pic_name || project.pic || '-'], 
+    [], 
+    [`Total Man days FSD:`, formatManDays(fsdHours)], 
+    [`Total Man days DEV:`, formatManDays(devHours)], 
+    [`Total Man days SIT:`, formatManDays(sitHours)], 
+    [], 
+    [ 
       "Project Name", "Phase L1", "Task", "Type Task", "Components", 
       "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
       "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
     ]
   ];
 
-  const merges: any[] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } } // Merge Title Bar
-  ];
-
+  const merges: any[] = [ { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } } ];
   let currentRow = 11; 
 
-  phasesList.forEach((phase) => {
-    const tasks = phase.children && phase.children.length > 0 ? phase.children : [{}];
-    const taskCount = tasks.length;
+  // Second Pass: Populate rows from sorted lists
+  sortedPhases.forEach((phase) => {
+    const rawTasks = phase.children && phase.children.length > 0 ? phase.children : [{}];
+    // APPLY SORTING TO TASKS INSIDE PHASE
+    const sortedTasks = safeSortData(rawTasks);
     const startRow = currentRow; 
+    let phaseTotalHours = 0;
 
-    tasks.forEach((task: any) => {
+    sortedTasks.forEach((task: any) => {
       const hours = parseFloat(task.man_hours || task.hours) || 0;
       const mins = hours * 60;
+      phaseTotalHours += hours;
 
       aoa.push([
         project.project_name || project.name || '-',
@@ -95,8 +112,8 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
         task.detail_task || task.detail || '-',
         hours ? `${hours} h` : '-',
         mins ? `${mins} m` : '-',
-        formatDate(task.start_time || task.start_date), // Row Data Start Date (FORMATTED)
-        formatDate(task.end_time || task.end_date),   // Row Data End Date (FORMATTED)
+        formatDate(task.start_time || task.start_date), 
+        formatDate(task.end_time || task.end_date),   
         task.status || 'TODO',
         task.suggestion_fachrul || task.fachrul_feedback || '-',
         task.suggestion_barra || task.barra_feedback || '-'
@@ -104,9 +121,26 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
       currentRow++;
     });
 
-    if (taskCount > 1) {
-      merges.push({ s: { r: startRow, c: 1 }, e: { r: startRow + taskCount - 1, c: 1 } }); // Merge Phase L1
-      merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow + taskCount - 1, c: 0 } }); // Merge Project Name
+    // === INJECT SUBTOTAL ROW AT THE END OF L1 ===
+    const safePhaseName = (phase.title || phase.name || 'PHASE').toUpperCase();
+    aoa.push([
+      project.project_name || project.name || '-', 
+      phase.title || phase.name || '-', 
+      `TOTAL ${safePhaseName} MANDAYS :`, // In Task Column (Index 2)
+      "", "", "", // Empty Type, Components, Detail
+      formatManDays(phaseTotalHours), // In Man Hours Column (Index 6)
+      `${phaseTotalHours * 60} Mins`, // In Minutes Column (Index 7)
+      "", "", "", "", ""
+    ]);
+    
+    // Merge Subtotal Label across columns C, D, E, F (Index 2 to 5)
+    merges.push({ s: { r: currentRow, c: 2 }, e: { r: currentRow, c: 5 } });
+    currentRow++;
+
+    // Merge L1 and Project Name vertically across all tasks + the subtotal row
+    if (currentRow - startRow > 1) {
+      merges.push({ s: { r: startRow, c: 1 }, e: { r: currentRow - 1, c: 1 } }); 
+      merges.push({ s: { r: startRow, c: 0 }, e: { r: currentRow - 1, c: 0 } }); 
     }
   });
 
@@ -116,11 +150,11 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
   // Set Column Widths
   ws['!cols'] = [
     { wch: 25 }, { wch: 15 }, { wch: 45 }, { wch: 15 }, { wch: 25 }, 
-    { wch: 65 }, { wch: 12 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, 
+    { wch: 65 }, { wch: 18 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, 
     { wch: 15 }, { wch: 35 }, { wch: 35 }
   ];
 
-  // Define Reuseable Borders
+  // Borders and Formatting Styles
   const borderDef = {
     top: { style: "thin", color: { rgb: "D9D9D9" } },
     bottom: { style: "thin", color: { rgb: "D9D9D9" } },
@@ -128,12 +162,15 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
     right: { style: "thin", color: { rgb: "D9D9D9" } }
   };
 
-  // 3. APPLY PREMIUM RENDERING STYLES DYNAMICALLY
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
   for (let R = range.s.r; R <= range.e.r; ++R) {
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
       if (!ws[cellRef]) continue;
+      const cellValue = ws[cellRef].v;
+
+      // Is this our new Subtotal Row? (Check if value starts with TOTAL and ends with MANDAYS :)
+      const isSubtotal = typeof cellValue === 'string' && cellValue.startsWith('TOTAL ') && cellValue.includes('MANDAYS');
 
       if (R === 0) { // Main Title
         ws[cellRef].s = {
@@ -144,8 +181,7 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
       } else if ((R >= 2 && R <= 4) || (R >= 6 && R <= 8)) { // Metadata
         ws[cellRef].s = {
           font: { name: "Arial", sz: 10, bold: C === 0 || C === 3 || C === 6 },
-          alignment: { vertical: "center" },
-          border: (R === 4 || R === 8) ? { bottom: { style: "thin", color: { rgb: "D9D9D9" } } } : undefined
+          alignment: { vertical: "center" }
         };
       } else if (R === 10) { // Table Headers
         ws[cellRef].s = {
@@ -155,23 +191,32 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
           border: borderDef
         };
       } else if (R >= 11) { // Data Rows
-        if (C === 1 || C === 0) { // Center alignment for Project Name & Phase L1
+        if (C === 1 || C === 0) { // L1 and Project Name
           ws[cellRef].s = {
             fill: C === 1 ? { fgColor: { rgb: "F2F2F5" } } : undefined,
             font: { name: "Arial", sz: 10, bold: C === 1 },
             alignment: { horizontal: "center", vertical: "center", wrapText: true },
             border: borderDef
           };
-        } else if (C === 8 || C === 9 || C === 10) { // Center alignment for Dates & Status columns
+        } else if (isSubtotal) { // The Subtotal Label Cell
           ws[cellRef].s = {
-            font: { name: "Arial", sz: 10 },
-            alignment: { horizontal: "center", vertical: "top", wrapText: true },
+            fill: { fgColor: { rgb: "EAEAEA" } },
+            font: { name: "Arial", sz: 10, bold: true },
+            alignment: { horizontal: "right", vertical: "center" },
             border: borderDef
           };
-        } else { // Top-left alignment for Text-heavy columns
+        } else if (C >= 6 && typeof ws[XLSX.utils.encode_cell({c: 2, r: R})]?.v === 'string' && ws[XLSX.utils.encode_cell({c: 2, r: R})].v.startsWith('TOTAL ')) { 
+          // The Subtotal Value Cells (Man Hours & Minutes)
+          ws[cellRef].s = {
+            fill: { fgColor: { rgb: "EAEAEA" } },
+            font: { name: "Arial", sz: 10, bold: true },
+            alignment: { horizontal: "center", vertical: "center", wrapText: true },
+            border: borderDef
+          };
+        } else { // Normal Data Rows
           ws[cellRef].s = {
             font: { name: "Arial", sz: 10 },
-            alignment: { vertical: "top", wrapText: true },
+            alignment: { horizontal: (C >= 8 && C <= 10) ? "center" : "top", vertical: "top", wrapText: true },
             border: borderDef
           };
         }
@@ -179,9 +224,7 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
     }
   }
 
-  // Build and Trigger Download
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
   XLSX.writeFile(wb, `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}.xlsx`);
 };
-
