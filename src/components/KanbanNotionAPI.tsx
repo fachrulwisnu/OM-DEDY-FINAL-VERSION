@@ -47,6 +47,38 @@ export default function KanbanNotionAPI() {
 
   const { session, currentUser, loading: authLoading } = useAuth();
   
+  const getNotionValue = (props: any, exactColumnName: string) => {
+    if (!props || !props[exactColumnName]) return '-';
+    const prop = props[exactColumnName];
+    try {
+      switch (prop.type) {
+        case 'number': return prop.number !== null ? prop.number : '-';
+        case 'date': return prop.date?.start ? new Date(prop.date.start).toLocaleDateString('id-ID') : '-';
+        case 'formula': {
+          const val = prop.formula?.string || prop.formula?.number || prop.formula?.boolean;
+          return val !== undefined && val !== null ? val : '-';
+        }
+        case 'rich_text': return prop.rich_text?.[0]?.plain_text || '-';
+        case 'title': return prop.title?.[0]?.plain_text || '-';
+        case 'select': return prop.select?.name || '-';
+        case 'status': return prop.status?.name || '-';
+        case 'rollup': {
+          if (prop.rollup?.type === 'number') return prop.rollup?.number;
+          if (prop.rollup?.type === 'array') {
+            const first = prop.rollup?.array?.[0];
+            if (!first) return '-';
+            return first.number || first.rich_text?.[0]?.plain_text || first.select?.name || '-';
+          }
+          return '-';
+        }
+        default: return '-';
+      }
+    } catch (error) {
+      console.error(`Error parsing Notion prop ${exactColumnName}:`, error);
+      return '-';
+    }
+  };
+
   // 🔥 THE FIX: Core visibility logic
   const isLoggedIn = !!(session || currentUser);
   const isPublicView = !isLoggedIn;
@@ -92,11 +124,24 @@ export default function KanbanNotionAPI() {
     return () => clearInterval(intervalId);
   }, []);
 
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+
+  const categories = useMemo(() => {
+    const rawCategories = Array.from(new Set(data.map(item => {
+      const type = getNotionValue(item.raw_data?.properties, "Type Project") !== '-' ? getNotionValue(item.raw_data?.properties, "Type Project") : (getNotionValue(item.raw_data?.properties, "Project Type") !== '-' ? getNotionValue(item.raw_data?.properties, "Project Type") : "UNCATEGORIZED");
+      return type.trim().toUpperCase();
+    })));
+    return ['ALL', ...rawCategories.sort()];
+  }, [data]);
+
   const filteredData = useMemo(() => {
     return data.filter(item => {
-      const raw = item.raw_data || {};
-      const projectType = (raw["Type Project"] || "UNCATEGORIZED").trim().toUpperCase();
+      const type = getNotionValue(item.raw_data?.properties, "Type Project") !== '-' ? getNotionValue(item.raw_data?.properties, "Type Project") : (getNotionValue(item.raw_data?.properties, "Project Type") !== '-' ? getNotionValue(item.raw_data?.properties, "Project Type") : "UNCATEGORIZED");
+      const projectType = type.trim().toUpperCase();
       const status = (item.last_status || "").trim().toUpperCase();
+
+      // Category filter
+      if (selectedCategory !== 'ALL' && projectType !== selectedCategory) return false;
 
       // SECURITY: Privacy Gate for Public View
       if (isPublicView) {
@@ -116,7 +161,7 @@ export default function KanbanNotionAPI() {
       
       return matchesSearch && matchesStatus;
     });
-  }, [data, searchQuery, selectedStatuses, isPublicView]);
+  }, [data, searchQuery, selectedStatuses, isPublicView, selectedCategory]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -128,8 +173,8 @@ export default function KanbanNotionAPI() {
 
   const groupedProjects = useMemo(() => {
     return filteredData.reduce((acc, project) => {
-      const raw = project.raw_data || {};
-      const type = (raw["Type Project"] || "UNCATEGORIZED").trim().toUpperCase();
+      const typeRaw = getNotionValue(project.raw_data?.properties, "Type Project") !== '-' ? getNotionValue(project.raw_data?.properties, "Type Project") : (getNotionValue(project.raw_data?.properties, "Project Type") !== '-' ? getNotionValue(project.raw_data?.properties, "Project Type") : "UNCATEGORIZED");
+      const type = typeRaw.trim().toUpperCase();
       
       if (!acc[type]) {
         acc[type] = [];
@@ -172,23 +217,25 @@ export default function KanbanNotionAPI() {
               
               <div className="bg-[var(--bg-card)]/30 border-x border-b border-[var(--border)] rounded-b-2xl p-3 min-h-[500px] flex flex-col gap-3 backdrop-blur-sm">
                 <AnimatePresence mode="popLayout">
-                  {statusProjects.length > 0 ? (
+                    {statusProjects.length > 0 ? (
                     statusProjects.map((project) => {
                       const raw = project.raw_data || {};
-                      const projectName = raw["Project Name"] || project.project_name || "Loading Project...";
-                      const ticketId = raw["Ticket"] || project.ticket_id || "-";
-                      const picName = raw["PIC Name"] || "-";
-                      const ownerName = raw["Owner Name"] || "-";
-                      const ownerDiv = raw["Owner Div"] || "-";
+                      const properties = raw.properties || {};
+                      
+                      const projectName = getNotionValue(properties, "Project Name") !== '-' ? getNotionValue(properties, "Project Name") : (project.project_name || "Loading Project...");
+                      const ticketId = getNotionValue(properties, "Ticket") !== '-' ? getNotionValue(properties, "Ticket") : (project.ticket_id || "-");
+                      const picName = getNotionValue(properties, "PIC Name") !== '-' ? getNotionValue(properties, "PIC Name") : (getNotionValue(properties, "PIC") !== '-' ? getNotionValue(properties, "PIC") : "-");
+                      const ownerName = getNotionValue(properties, "Owner Name") !== '-' ? getNotionValue(properties, "Owner Name") : (getNotionValue(properties, "Owner") !== '-' ? getNotionValue(properties, "Owner") : "-");
+                      const ownerDiv = getNotionValue(properties, "Owner Div") !== '-' ? getNotionValue(properties, "Owner Div") : (getNotionValue(properties, "Division") !== '-' ? getNotionValue(properties, "Division") : "-");
 
-                      const fpsApproved = raw["Tgl FPS disetujui"] || "-";
-                      const fsdPlan = raw["(FSD) Plan in Week"] || "-";
-                      const fsdStatus = raw["(FSD) Status"] || "-";
-                      const devPlan = raw["(Dev) Plan in Week"] || "-";
-                      const devReal = raw["(Dev) Realized In Date"] || "-";
-                      const uatBatch = raw["(UAT) Batch\nMisal isinya :\n1 (23-11-2021)\n2 (29-11-2021, dilanjutkan 02-12-2021)"] || raw["(UAT) Batch"] || "-";
-                      const uatLate = raw["(UAT) Late Days"] || "-";
-                      const liveRealized = raw["(Live) Realized in Date"] || "-";
+                      const fpsApproved = getNotionValue(properties, "Tgl FPS disetujui");
+                      const fsdPlan = getNotionValue(properties, "(FSD) Plan in Week");
+                      const fsdStatus = getNotionValue(properties, "(FSD) Status");
+                      const devPlan = getNotionValue(properties, "(Dev) Plan in Week");
+                      const devReal = getNotionValue(properties, "(Dev) Realized In Date");
+                      const uatBatch = getNotionValue(properties, "(UAT) Batch\nMisal isinya :\n1 (23-11-2021)\n2 (29-11-2021, dilanjutkan 02-12-2021)") !== '-' ? getNotionValue(properties, "(UAT) Batch\nMisal isinya :\n1 (23-11-2021)\n2 (29-11-2021, dilanjutkan 02-12-2021)") : getNotionValue(properties, "(UAT) Batch");
+                      const uatLate = getNotionValue(properties, "(UAT) Late Days");
+                      const liveRealized = getNotionValue(properties, "(Live) Realized in Date");
 
                       return (
                         <motion.div
@@ -199,20 +246,20 @@ export default function KanbanNotionAPI() {
                           exit={{ opacity: 0, scale: 0.9 }}
                           whileHover={{ y: -2 }}
                           onClick={() => handleCardClick(project)}
-                          className="bg-[var(--bg-card)] border border-[var(--border)] p-4 rounded-2xl cursor-pointer hover:border-[var(--accent)] hover:bg-[var(--accent)]/5 transition-all shadow-sm group relative overflow-hidden flex flex-col h-full max-h-[340px]"
+                          className="bg-[var(--bg-card)] border border-[var(--border)] p-4 rounded-2xl cursor-pointer hover:border-[var(--accent)] hover:bg-[var(--accent)]/5 transition-all shadow-sm group relative overflow-hidden flex flex-col h-auto min-h-[220px]"
                         >
                           <div className="relative z-10 flex flex-col h-full">
-                            <div className="flex justify-between items-start mb-1">
-                              <span className="text-[10px] text-[var(--text-sub)] font-mono bg-[var(--bg-page)] border border-[var(--border)] px-2 py-0.5 rounded">#{ticketId}</span>
-                              <span className="text-[10px] text-[var(--text-sub)] font-bold">{raw["Kuartal"] || ""}</span>
+                            <div className="flex justify-between items-start mb-1 gap-2">
+                              <span className="text-[10px] text-[var(--text-sub)] font-mono bg-[var(--bg-page)] border border-[var(--border)] px-2 py-0.5 rounded shrink-0">#{ticketId}</span>
+                              <span className="text-[10px] text-[var(--text-sub)] font-bold text-right shrink-0">{getNotionValue(properties, "Kuartal") !== '-' ? getNotionValue(properties, "Kuartal") : ""}</span>
                             </div>
-                            <h3 className="font-bold text-sm text-[var(--text-main)] line-clamp-2 leading-tight group-hover:text-[var(--accent)] transition-colors">
+                            <h3 className="font-bold text-sm text-[var(--text-main)] leading-tight group-hover:text-[var(--accent)] transition-colors whitespace-normal break-words mb-2">
                               {projectName}
                             </h3>
                             
-                            <div className="mt-2 text-[10px] text-[var(--text-sub)] space-y-0.5">
-                              <p className="truncate"><span className="text-[var(--accent)] font-bold">PIC:</span> {picName}</p>
-                              <p className="truncate"><span className="text-[var(--accent)] font-bold">OWNER:</span> {ownerName} • {ownerDiv}</p>
+                            <div className="mt-auto text-[10px] text-[var(--text-sub)] space-y-1">
+                              <p className="whitespace-normal break-words"><span className="text-[var(--accent)] font-black uppercase text-[9px] mr-1">PIC:</span> {picName}</p>
+                              <p className="whitespace-normal break-words"><span className="text-[var(--accent)] font-black uppercase text-[9px] mr-1">Owner:</span> {ownerName} • {ownerDiv}</p>
                             </div>
                             
                             <div className="border-t border-[var(--border)] my-3 opacity-50"></div>
@@ -468,10 +515,19 @@ export default function KanbanNotionAPI() {
             className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl py-3 pl-12 pr-4 text-sm text-[var(--text-main)] placeholder:text-[var(--text-sub)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)] transition-all font-medium"
           />
         </div>
-        <div className="md:w-64">
-           <div className="h-full flex items-center px-4 bg-[var(--bg-page)] rounded-xl border border-[var(--border)] text-[10px] font-black uppercase tracking-widest text-[var(--text-sub)] italic">
-             {selectedStatuses.length} Statuses Active In Board
-           </div>
+        <div className="md:w-72">
+          <div className="relative group h-full">
+            <Filter className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-sub)] group-focus-within:text-[var(--accent)] transition-colors" />
+            <select 
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full h-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl py-3 pl-12 pr-4 text-sm text-[var(--text-main)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)] transition-all font-bold uppercase tracking-tighter"
+            >
+              {categories.map(cat => (
+                <option key={cat} value={cat}>{cat === 'ALL' ? 'ALL CATEGORIES / STREAMS' : cat}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 

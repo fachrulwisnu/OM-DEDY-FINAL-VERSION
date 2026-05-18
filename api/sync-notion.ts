@@ -101,14 +101,14 @@ export default async function handler(req: any, res: any) {
     const projectsToUpsert = allRecords.map((page: any) => {
       const props = page.properties;
       
-      const ticket_id = getPropertyValue(props['Ticket']) || getPropertyValue(props['Ticket ID']);
-      const project_name = getPropertyValue(props['Name']) || getPropertyValue(props['Project Name']);
+      const ticket_id = getPropertyValue(props['Ticket']) || getPropertyValue(props['Ticket ID']) || getPropertyValue(props['TICKET ID']);
+      const project_name = getPropertyValue(props['Name']) || getPropertyValue(props['Project Name']) || getPropertyValue(props['Nama Project']);
       
       if (!ticket_id || !project_name) return null;
 
-      const last_status_raw = getPropertyValue(props['Last Status']) || getPropertyValue(props['Status']) || 'On Queue';
+      const last_status_raw = getPropertyValue(props['Last Status']) || getPropertyValue(props['Status']) || getPropertyValue(props['last_status']) || 'On Queue';
       
-      // Auto-normalize to match MIGRATION_STATUSES if it's almost the same
+      // Auto-normalize to match MIGRATION_STATUSES
       const MIGRATION_STATUSES = [
         'On Queue', 'FSD On Progress', 'Dev On Queue', 'Dev On Progress', 'SIT On Progress',
         'UAT On Queue', 'UAT On Progress', 'Change Request On Progress', 'Hold By Owner',
@@ -116,10 +116,11 @@ export default async function handler(req: any, res: any) {
       ];
       const last_status = MIGRATION_STATUSES.find(s => s.toLowerCase() === last_status_raw.toLowerCase()) || last_status_raw;
 
-      const pic_name = getPropertyValue(props['PIC Name']) || 'Unassigned';
-      const owner_div = getPropertyValue(props['Owner Div']);
-      const owner_name = getPropertyValue(props['Owner Name']);
-      const project_type = getPropertyValue(props['Type Project']) || 'Uncategorized';
+      // PIC and Owner extraction with fallbacks
+      const pic_name = getPropertyValue(props['PIC Name']) || getPropertyValue(props['PIC']) || 'Unassigned';
+      const owner_div = getPropertyValue(props['Owner Div']) || getPropertyValue(props['Division']);
+      const owner_name = getPropertyValue(props['Owner Name']) || getPropertyValue(props['Owner']) || 'Unassigned';
+      const project_type = getPropertyValue(props['Type Project']) || getPropertyValue(props['Project Type']) || 'Uncategorized';
       const last_update_log = getPropertyValue(props['Last Update']) || getPropertyValue(props['(Dev) Progress Updated']) || getPropertyValue(props['(SIT) Progress Updated']);
 
       // Extra fields requested

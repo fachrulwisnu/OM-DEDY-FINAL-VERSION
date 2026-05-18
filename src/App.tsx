@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, Component, ErrorInfo, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { useNavigate, Routes, Route, useLocation, useParams, Navigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 
@@ -884,33 +885,36 @@ export default function App() {
   }, [location.pathname, viewState]);
 
   const setActiveView = (view: AppView) => {
-    if (hasUnsavedChanges) {
-      if (!window.confirm("Ada data yang belum tersimpan. Lanjutkan pindah halaman?")) {
-        return;
+    const executeAction = () => {
+      setViewState(view);
+      switch(view) {
+        case 'PROJECTS': navigate('/portofolio'); break;
+        case 'KANBAN': navigate('/kanban'); break;
+        case 'SCHEDULE': navigate('/schedule'); break;
+        case 'AUDIT': navigate('/audit'); break;
+        case 'PERSONEL': navigate('/personnel'); break;
+        case 'RESCHEDULE': navigate('/approvals'); break;
+        case 'MASTER_PROJECT': navigate('/master-project'); break;
+        case 'TOR_MONITOR': navigate('/tor-monitor'); break;
+        case 'NOTION_MIGRATE': navigate('/notion-migrate'); break;
+        case 'NOTION_MONITORING': navigate('/notion-monitoring'); break;
+        case 'NOTION_API_RESULTS': navigate('/notion-api-results'); break;
+        case 'TIMELINE': navigate('/timeline'); break;
+        case 'OM_DEDY_KALDEV': navigate('/kaldev'); break;
+        case 'API_DOCS': navigate('/api-docs'); break;
+        case 'GANTT_DETAIL': 
+          if (selectedProjectId) navigate(`/detail-timeline/${selectedProjectId}`);
+          else navigate('/portofolio');
+          break;
       }
-      setHasUnsavedChanges(false);
+    };
+
+    if (hasUnsavedChanges) {
+      setPendingAction(() => executeAction);
+      setShowGlobalUnsavedModal(true);
+      return;
     }
-    setViewState(view);
-    switch(view) {
-      case 'PROJECTS': navigate('/portofolio'); break;
-      case 'KANBAN': navigate('/kanban'); break;
-      case 'SCHEDULE': navigate('/schedule'); break;
-      case 'AUDIT': navigate('/audit'); break;
-      case 'PERSONEL': navigate('/personnel'); break;
-      case 'RESCHEDULE': navigate('/approvals'); break;
-      case 'MASTER_PROJECT': navigate('/master-project'); break;
-      case 'TOR_MONITOR': navigate('/tor-monitor'); break;
-      case 'NOTION_MIGRATE': navigate('/notion-migrate'); break;
-      case 'NOTION_MONITORING': navigate('/notion-monitoring'); break;
-      case 'NOTION_API_RESULTS': navigate('/notion-api-results'); break;
-      case 'TIMELINE': navigate('/timeline'); break;
-      case 'OM_DEDY_KALDEV': navigate('/kaldev'); break;
-      case 'API_DOCS': navigate('/api-docs'); break;
-      case 'GANTT_DETAIL': 
-        if (selectedProjectId) navigate(`/detail-timeline/${selectedProjectId}`);
-        else navigate('/portofolio');
-        break;
-    }
+    executeAction();
   };
 
   // RBAC Redirect Protection
@@ -942,6 +946,8 @@ export default function App() {
   }, [location.pathname]);
 
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [showGlobalUnsavedModal, setShowGlobalUnsavedModal] = useState(false);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -2221,9 +2227,27 @@ export default function App() {
                   onOpenProject={(id) => { setSelectedProjectId(id); navigate(`/detail-timeline/${id}`); }} 
                   onDeleteProject={handleDeleteProject}
                   onUpdateProject={handleUpdateProject}
-                  onCreateRequested={() => setIsCreateProjectModalOpen(true)}
+                  onCreateRequested={() => {
+                    if (hasUnsavedChanges) {
+                      setPendingAction(() => () => setIsCreateProjectModalOpen(true));
+                      setShowGlobalUnsavedModal(true);
+                    } else {
+                      setIsCreateProjectModalOpen(true);
+                    }
+                  }}
                   onReschedule={(p) => setReschedulingProject(p)}
-                  setEditingProject={setEditingProject}
+                  setEditingProject={(p) => {
+                    if (hasUnsavedChanges) {
+                      setPendingAction(() => () => {
+                        setEditingProject(p);
+                        setIsProjectDetailOpen(true);
+                      });
+                      setShowGlobalUnsavedModal(true);
+                    } else {
+                      setEditingProject(p);
+                      setIsProjectDetailOpen(true);
+                    }
+                  }}
                   setIsProjectDetailOpen={setIsProjectDetailOpen}
                   isMobile={isMobile}
                 />
@@ -2319,6 +2343,21 @@ export default function App() {
             </Routes>
           </ErrorBoundary>
         </section>
+        <UnsavedChangesModal 
+          isOpen={showGlobalUnsavedModal}
+          onClose={() => {
+            setShowGlobalUnsavedModal(false);
+            setPendingAction(null);
+          }}
+          onDiscard={() => {
+            setShowGlobalUnsavedModal(false);
+            setHasUnsavedChanges(false);
+            if (pendingAction) {
+              pendingAction();
+              setPendingAction(null);
+            }
+          }}
+        />
       </main>
 
       <AnimatePresence>
@@ -3634,60 +3673,21 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
               onClick={handleCreate}
               className="bg-[var(--accent)] hover:bg-[var(--accent)]/90 disabled:opacity-30 disabled:grayscale text-white px-10 py-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_10px_30px_rgba(67,24,255,0.3)] hover:shadow-[0_15px_40px_rgba(67,24,255,0.4)] flex items-center gap-3 disabled:cursor-not-allowed"
             >
-              {loading ? (
-                <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <Rocket className="w-5 h-5" />
-                  Spawn Infrastructure
-                </>
-              )}
+              {loading ? "Synchronizing..." : "Spawn Infrastructure"}
             </button>
           </div>
         </div>
       </motion.div>
 
-      {showDeddyModal && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-md">
-          <div className="bg-[#0b0c13] border-2 border-white/90 rounded-2xl p-8 w-[500px] shadow-2xl shadow-white/5 flex flex-col items-center">
-            
-            <div className="mb-6 rounded-xl overflow-hidden border border-gray-800">
-              <img 
-                src="image_20.png" 
-                alt="Deddy Corbuzier wants you to focus" 
-                className="w-[300px] h-[225px] object-cover" 
-              />
-            </div>
-            
-            <h3 className="text-3xl font-extrabold text-white mb-2 tracking-tighter text-center">
-              EITSS... MAU KEMANA? <span className="text-red-500">OOKE?</span>
-            </h3>
-            
-            <p className="text-gray-300 text-base mb-8 text-center px-4">
-              Data lu belum kesimpen! Sekalipun kepencet Cancel, jangan iseng pindah halaman dulu. Selesaikan data lu dulu, oke?
-            </p>
-            
-            <div className="flex justify-center gap-4 w-full">
-              <button 
-                onClick={() => setShowDeddyModal(false)}
-                className="px-6 py-3 rounded-lg text-sm font-semibold text-gray-200 bg-gray-900 border border-gray-700 hover:bg-gray-800 transition-colors flex-1"
-              >
-                Balik Ngetik (Keep Editing)
-              </button>
-              <button 
-                onClick={() => {
-                  setShowDeddyModal(false);
-                  setHasUnsavedChanges(false);
-                  onClose(); 
-                }}
-                className="px-6 py-3 rounded-lg text-sm font-bold bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-900/50 transition-colors flex-1"
-              >
-                Iya, Buang Aja (Discard Changes)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <UnsavedChangesModal 
+        isOpen={showDeddyModal}
+        onClose={() => setShowDeddyModal(false)}
+        onDiscard={() => {
+          setShowDeddyModal(false);
+          setHasUnsavedChanges(false);
+          onClose();
+        }}
+      />
     </div>
   );
 }
@@ -4318,48 +4318,74 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
         </div>
       </motion.div>
 
-      {showDeddyModal && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-md">
-          <div className="bg-[#0b0c13] border-2 border-white/90 rounded-2xl p-8 w-[500px] shadow-2xl shadow-white/5 flex flex-col items-center">
-            
-            <div className="mb-6 rounded-xl overflow-hidden border border-gray-800">
-              <img 
-                src="image_20.png" 
-                alt="Deddy Corbuzier wants you to focus" 
-                className="w-[300px] h-[225px] object-cover" 
-              />
-            </div>
-            
-            <h3 className="text-3xl font-extrabold text-white mb-2 tracking-tighter text-center">
-              EITSS... MAU KEMANA? <span className="text-red-500">OOKE?</span>
-            </h3>
-            
-            <p className="text-gray-300 text-base mb-8 text-center px-4">
-              Data lu belum kesimpen! Sekalipun kepencet Cancel, jangan iseng pindah halaman dulu. Selesaikan data lu dulu, oke?
-            </p>
-            
-            <div className="flex justify-center gap-4 w-full">
-              <button 
-                onClick={() => setShowDeddyModal(false)}
-                className="px-6 py-3 rounded-lg text-sm font-semibold text-gray-200 bg-gray-900 border border-gray-700 hover:bg-gray-800 transition-colors flex-1"
-              >
-                Balik Ngetik (Keep Editing)
-              </button>
-              <button 
-                onClick={() => {
-                  setShowDeddyModal(false);
-                  setHasUnsavedChanges(false);
-                  onClose(); 
-                }}
-                className="px-6 py-3 rounded-lg text-sm font-bold bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-900/50 transition-colors flex-1"
-              >
-                Iya, Buang Aja (Discard Changes)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <UnsavedChangesModal 
+        isOpen={showDeddyModal}
+        onClose={() => setShowDeddyModal(false)}
+        onDiscard={() => {
+          setShowDeddyModal(false);
+          setHasUnsavedChanges(false);
+          onClose();
+        }}
+      />
     </div>
+  );
+}
+
+function UnsavedChangesModal({ 
+  isOpen, 
+  onClose, 
+  onDiscard 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onDiscard: () => void 
+}) {
+  if (!isOpen) return null;
+
+  return ReactDOM.createPortal(
+    <div 
+      className="fixed inset-0 flex items-center justify-center bg-black/90 backdrop-blur-xl z-[9999999]"
+      style={{ zIndex: 9999999 }}
+    >
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-[#0d0e14] border border-white/10 rounded-2xl p-8 w-full max-w-[500px] shadow-[0_0_50px_rgba(255,255,255,0.05)] flex flex-col items-center"
+      >
+        <div className="mb-6 rounded-xl overflow-hidden border border-white/5 bg-black/40">
+          <img 
+            src="https://drive.google.com/uc?id=16pystT5qflVtlY4w1QxrYsr8Z8Tb8Omk" 
+            alt="Warning" 
+            className="w-[320px] h-[240px] object-cover opacity-90 transition-opacity hover:opacity-100" 
+          />
+        </div>
+        
+        <div className="text-center space-y-3 mb-8 px-4">
+          <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center justify-center gap-2">
+            <span className="text-red-500 text-2xl">⚠️</span> JANGAN PINDAH DULU!
+          </h3>
+          <p className="text-gray-400 text-sm leading-relaxed font-medium">
+            Data lu belum kesimpen, <span className="text-white font-bold italic">Oke?</span> Kalau pindah sekarang, semua yang lu ketik bakal hilang permanently.
+          </p>
+        </div>
+        
+        <div className="flex flex-col sm:flex-row justify-center gap-3 w-full">
+          <button 
+            onClick={onClose}
+            className="px-8 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-gray-300 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white transition-all transform active:scale-95 flex-1"
+          >
+            Balik Ngetik
+          </button>
+          <button 
+            onClick={onDiscard}
+            className="px-8 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-600 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all transform active:scale-95 flex-1"
+          >
+            Iya, Buang Aja
+          </button>
+        </div>
+      </motion.div>
+    </div>,
+    document.body
   );
 }
 
@@ -4444,7 +4470,7 @@ function BatchManualEntryModal({ onClose, onSuccess, users }: { onClose: () => v
               <Copy className="w-3 h-3 text-[var(--accent)]" /> Massive Schedule Update
             </p>
           </div>
-          <button onClick={handleAttemptClose} className="p-3 hover:bg-[var(--bg-page)] rounded-2xl text-[var(--text-sub)] transition-all">
+          <button onClick={onClose} className="p-3 hover:bg-[var(--bg-page)] rounded-2xl text-[var(--text-sub)] transition-all">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -6376,15 +6402,15 @@ function KanbanView({ projects, tasks, onOpenGantt, onUpdateProject }: { project
                         key={getSafeKey(p, j, 'kanban-project')}
                         onClick={() => onUpdateProject(p.id, { status: col.id as ProjectStatus })}
                         className={cn(
-                          "bg-[var(--bg-card)] border rounded-xl p-4 shadow-sm hover:shadow-xl cursor-pointer transition-all hover:bg-[var(--bg-page)] group relative overflow-hidden",
+                          "bg-[var(--bg-card)] border rounded-xl p-4 shadow-sm hover:shadow-xl cursor-pointer transition-all hover:bg-[var(--bg-page)] group relative overflow-hidden h-auto min-h-[180px] flex flex-col",
                           isLate ? "border-rose-500/50 shadow-[0_0_10px_rgba(244,63,94,0.1)]" : "border-[var(--border)] hover:border-[var(--accent)]/50"
                         )}
                       >
-                        <div className="relative z-10">
+                        <div className="relative z-10 flex flex-col h-full">
                           <div className="flex justify-between items-start gap-2 mb-2">
-                            <h4 className="text-xs font-black text-[var(--text-main)] italic uppercase tracking-tighter transition-colors">{p.project_name || "Loading Project..."}</h4>
+                            <h4 className="text-xs font-black text-[var(--text-main)] italic uppercase tracking-tighter transition-colors whitespace-normal break-words leading-tight">{p.project_name || "Loading Project..."}</h4>
                             {isLate && (
-                              <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[7px] font-black uppercase tracking-widest rounded animate-pulse">LATE</span>
+                              <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[7px] font-black uppercase tracking-widest rounded animate-pulse shrink-0">LATE</span>
                             )}
                           </div>
                           
@@ -6399,32 +6425,34 @@ function KanbanView({ projects, tasks, onOpenGantt, onUpdateProject }: { project
                              </div>
                           </div>
                           
-                          <div className="space-y-1.5">
-                            <div className="flex justify-between text-[9px] font-bold uppercase tracking-tighter italic">
-                              <span className="text-[var(--text-sub)]">Infrastructure Health</span>
-                              <span className="text-[var(--accent)]">{Math.round(progress)}%</span>
+                          <div className="flex flex-col h-full bg-black/20 -mx-4 -mb-4 p-4 mt-auto">
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between text-[9px] font-bold uppercase tracking-tighter italic">
+                                <span className="text-[var(--text-sub)]">Infrastructure Health</span>
+                                <span className="text-[var(--accent)]">{Math.round(progress)}%</span>
+                              </div>
+                              <div className="h-1 bg-[var(--bg-page)] rounded-full overflow-hidden">
+                                <motion.div 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${progress}%` }}
+                                  className={cn(
+                                    "h-full",
+                                    progress === 100 ? "bg-emerald-500" : "bg-[var(--accent)]"
+                                  )}
+                                />
+                              </div>
                             </div>
-                            <div className="h-1 bg-[var(--bg-page)] rounded-full overflow-hidden">
-                              <motion.div 
-                                initial={{ width: 0 }}
-                                animate={{ width: `${progress}%` }}
-                                className={cn(
-                                  "h-full",
-                                  progress === 100 ? "bg-emerald-500" : "bg-[var(--accent)]"
-                                )}
-                              />
-                            </div>
-                          </div>
 
-                          <div className="mt-4 pt-4 border-t border-[var(--border)] flex items-center justify-between">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); onOpenGantt(p.id); }}
-                              className="px-3 py-1.5 bg-[var(--accent)] hover:bg-[var(--accent)]/90 rounded-lg text-[9px] font-black uppercase tracking-widest text-white transition-all shadow-md active:scale-95"
-                            >
-                              Gantt Detail
-                            </button>
-                            <div className="w-6 h-6 rounded-lg bg-[var(--bg-page)] flex items-center justify-center font-black text-[8px] text-[var(--accent)] border border-[var(--border)]">
-                              {(p.project_name || '?').charAt(0)}
+                            <div className="mt-4 pt-4 border-t border-[var(--border)] flex items-center justify-between">
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); onOpenGantt(p.id); }}
+                                className="px-3 py-1.5 bg-[var(--accent)] hover:bg-[var(--accent)]/90 rounded-lg text-[9px] font-black uppercase tracking-widest text-white transition-all shadow-md active:scale-95"
+                              >
+                                Gantt Detail
+                              </button>
+                              <div className="w-6 h-6 rounded-lg bg-[var(--bg-page)] flex items-center justify-center font-black text-[8px] text-[var(--accent)] border border-[var(--border)]">
+                                {(p.project_name || '?').charAt(0)}
+                              </div>
                             </div>
                           </div>
                         </div>

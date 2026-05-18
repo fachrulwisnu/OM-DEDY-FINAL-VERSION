@@ -16,6 +16,39 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
   if (!isOpen || !project) return null;
 
   const raw = project.raw_data || {};
+  const properties = raw.properties || {};
+
+  const getNotionValue = (props: any, exactColumnName: string) => {
+    if (!props || !props[exactColumnName]) return '-';
+    const prop = props[exactColumnName];
+    try {
+      switch (prop.type) {
+        case 'number': return prop.number !== null ? prop.number : '-';
+        case 'date': return prop.date?.start ? new Date(prop.date.start).toLocaleDateString('id-ID') : '-';
+        case 'formula': {
+          const val = prop.formula?.string || prop.formula?.number || prop.formula?.boolean;
+          return val !== undefined && val !== null ? val : '-';
+        }
+        case 'rich_text': return prop.rich_text?.[0]?.plain_text || '-';
+        case 'title': return prop.title?.[0]?.plain_text || '-';
+        case 'select': return prop.select?.name || '-';
+        case 'status': return prop.status?.name || '-';
+        case 'rollup': {
+          if (prop.rollup?.type === 'number') return prop.rollup?.number;
+          if (prop.rollup?.type === 'array') {
+            const first = prop.rollup?.array?.[0];
+            if (!first) return '-';
+            return first.number || first.rich_text?.[0]?.plain_text || first.select?.name || '-';
+          }
+          return '-';
+        }
+        default: return '-';
+      }
+    } catch (error) {
+      console.error(`Error parsing Notion prop ${exactColumnName}:`, error);
+      return '-';
+    }
+  };
 
   // Helper to colorize SLA
   const getSlaColor = (status: string | any) => {
@@ -151,12 +184,12 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2 space-y-6">
                        <Section title="Project Metadata" icon={ListChecks}>
-                          <Stat label="Project Name" value={raw["Project Name"] || project.project_name} />
-                          <Stat label="Ticket ID" value={raw["Ticket"] || project.ticket_id} />
-                          <Stat label="Project Type" value={raw["Type Project"] || project.project_type} />
-                          <Stat label="PIC Name" value={raw["PIC Name"] || project.pic_name} />
-                          <Stat label="Owner Name" value={raw["Owner Name"] || project.owner_name} />
-                          <Stat label="Division" value={raw["Owner Div"] || project.owner_div} />
+                          <Stat label="Project Name" value={getNotionValue(properties, "Project Name") || project.project_name} />
+                          <Stat label="Ticket ID" value={getNotionValue(properties, "Ticket") || project.ticket_id} />
+                          <Stat label="Project Type" value={getNotionValue(properties, "Type Project") || project.project_type} />
+                          <Stat label="PIC Name" value={getNotionValue(properties, "PIC Name") || project.pic_name} />
+                          <Stat label="Owner Name" value={getNotionValue(properties, "Owner Name") || project.owner_name} />
+                          <Stat label="Division" value={getNotionValue(properties, "Owner Div") || project.owner_div} />
                        </Section>
 
                       {/* Performance & Effort Metrics Dashboard */}
@@ -165,15 +198,18 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
                         <div className="grid grid-cols-3 gap-4">
                           <div className="bg-black/20 p-4 rounded-2xl border border-white/5 flex flex-col gap-1">
                             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total Effective Days</p>
-                            <p className="text-2xl font-black text-white">{raw["Total Effective days"] || "-"} <span className="text-xs font-normal text-slate-600 italic">Days</span></p>
+                            <p className="text-2xl font-black text-white">
+                              {getNotionValue(properties, "Total Effective Days") !== '-' ? getNotionValue(properties, "Total Effective Days") : (getNotionValue(properties, "Total Effective days") !== '-' ? getNotionValue(properties, "Total Effective days") : "-")} 
+                              <span className="text-xs font-normal text-slate-600 italic ml-1">Days</span>
+                            </p>
                           </div>
                           <div className="bg-black/20 p-4 rounded-2xl border border-white/5 flex flex-col gap-1">
                             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Project Diajukan</p>
-                            <p className="text-2xl font-black text-white">{raw["Project diajukan"] || "-"}</p>
+                            <p className="text-2xl font-black text-white">{getNotionValue(properties, "Project Diajukan") !== '-' ? getNotionValue(properties, "Project Diajukan") : (getNotionValue(properties, "Project diajukan") !== '-' ? getNotionValue(properties, "Project diajukan") : "-")}</p>
                           </div>
                           <div className="bg-black/20 p-4 rounded-2xl border border-white/5 flex flex-col gap-1">
                             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Progress PMA</p>
-                            <p className="text-2xl font-black text-white">{raw["Progress PMA"] || "-"}</p>
+                            <p className="text-2xl font-black text-white">{getNotionValue(properties, "Progress PMA")}</p>
                           </div>
                         </div>
 
@@ -185,15 +221,15 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
                           </div>
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {[
-                              { phase: "FSD Performance", sla: raw["FSD SLA Status"], late: raw["(FSD) Late Days"], elapse: raw["(FSD) Elapse Days"] },
-                              { phase: "DEV Performance", sla: raw["DEV SLA"], late: raw["(Dev) Late Days"], elapse: raw["(Dev) Elapse Days"] },
-                              { phase: "SIT Performance", sla: raw["SIT SLA Status"], late: raw["(SIT) Late Days"], elapse: raw["(SIT) Elapse Days"] },
-                              { phase: "UAT Performance", sla: raw["UAT SLA Status"], late: raw["(UAT) Late Days"], elapse: raw["(UAT) Elapse Days"] },
+                              { phase: "FSD Performance", sla: getNotionValue(properties, "FSD SLA Status") !== '-' ? getNotionValue(properties, "FSD SLA Status") : getNotionValue(properties, "FSD SLA"), late: getNotionValue(properties, "(FSD) Late Days"), elapse: getNotionValue(properties, "(FSD) Elapse Days") },
+                              { phase: "DEV Performance", sla: getNotionValue(properties, "DEV SLA"), late: getNotionValue(properties, "(Dev) Late Days"), elapse: getNotionValue(properties, "(Dev) Elapse Days") },
+                              { phase: "SIT Performance", sla: getNotionValue(properties, "SIT SLA Status"), late: getNotionValue(properties, "(SIT) Late Days"), elapse: getNotionValue(properties, "(SIT) Elapse Days") },
+                              { phase: "UAT Performance", sla: getNotionValue(properties, "UAT SLA Status"), late: getNotionValue(properties, "(UAT) Late Days"), elapse: getNotionValue(properties, "(UAT) Elapse Days") },
                             ].map((item, i) => (
                               <div key={i} className={cn("p-4 rounded-2xl border border-white/5 flex flex-col gap-3 transition-all", getSlaColor(item.sla))}>
                                 <p className="text-[10px] uppercase font-black tracking-widest opacity-80">{item.phase}</p>
                                 <div className="space-y-2 text-[11px] font-bold">
-                                  <div className="flex justify-between items-center"><span className="opacity-40 uppercase text-[9px]">SLA</span> <span className={cn(item.sla === 'Achieved' ? 'text-emerald-400' : '')}>{item.sla || "-"}</span></div>
+                                  <div className="flex justify-between items-center"><span className="opacity-40 uppercase text-[9px]">SLA</span> <span className={cn(String(item.sla).includes('Achieved') || String(item.sla) === 'TRUE' ? 'text-emerald-400' : '')}>{item.sla || "-"}</span></div>
                                   <div className="flex justify-between items-center"><span className="opacity-40 uppercase text-[9px]">Late</span> <span>{item.late || "-"}</span></div>
                                   <div className="flex justify-between items-center"><span className="opacity-40 uppercase text-[9px]">Elapse</span> <span>{item.elapse || "-"} <span className="opacity-30 text-[9px]">Days</span></span></div>
                                 </div>
@@ -209,7 +245,7 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
                              <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Effective Days Breakdown</h4>
                           </div>
                           <pre className="text-[11px] text-slate-400 whitespace-pre-wrap font-mono leading-relaxed bg-black/20 p-5 rounded-2xl border border-white/10 shadow-inner">
-                            {raw["Effective days"] || "Tidak ada detail waktu."}
+                            {getNotionValue(properties, "Effective days") !== '-' ? getNotionValue(properties, "Effective days") : "Tidak ada detail waktu."}
                           </pre>
                         </div>
                       </div>
@@ -224,15 +260,15 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
                            <div className="space-y-4">
                               <div className="p-4 bg-black/20 rounded-2xl border border-white/5">
                                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">Global Status</span>
-                                 <span className="text-sm font-black text-white">{raw["Last Status"] || project.last_status}</span>
+                                  <span className="text-sm font-black text-white">{getNotionValue(properties, "Last Status") || project.last_status}</span>
                               </div>
                               <div className="p-4 bg-black/20 rounded-2xl border border-white/5">
                                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">FSD Status</span>
-                                 <span className="text-sm font-black text-white">{raw["(FSD) Status"] || project.fsd_status || '-'}</span>
+                                 <span className="text-sm font-black text-white">{getNotionValue(properties, "(FSD) Status") || project.fsd_status || '-'}</span>
                               </div>
                               <div className="p-4 bg-black/20 rounded-2xl border border-white/5">
                                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">UAT Status</span>
-                                 <span className="text-sm font-black text-white">{raw["(UAT) Status"] || project.uat_status || '-'}</span>
+                                 <span className="text-sm font-black text-white">{getNotionValue(properties, "(UAT) Status") || project.uat_status || '-'}</span>
                               </div>
                            </div>
                         </div>
@@ -268,26 +304,26 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
                              </div>
                           </div>
 
-                          {raw['(Dev) Progress Updated'] && (
+                          {getNotionValue(properties, "(Dev) Progress Updated") !== '-' && (
                             <div className="relative pl-10">
                               <div className="absolute left-0 top-1.5 w-6 h-6 rounded-full bg-amber-600/20 border border-amber-500/40 flex items-center justify-center">
                                  <div className="w-2 h-2 rounded-full bg-amber-500" />
                               </div>
                               <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest block mb-1">Dev Progress Update</span>
                               <div className="p-4 bg-white/5 border border-white/5 rounded-2xl text-xs text-slate-300 leading-relaxed font-medium">
-                                 {raw['(Dev) Progress Updated']}
+                                 {getNotionValue(properties, "(Dev) Progress Updated")}
                               </div>
                             </div>
                           )}
 
-                          {raw['(FSD) Progress Updated'] && (
+                          {getNotionValue(properties, "(FSD) Progress Updated") !== '-' && (
                             <div className="relative pl-10">
                               <div className="absolute left-0 top-1.5 w-6 h-6 rounded-full bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center">
                                  <div className="w-2 h-2 rounded-full bg-emerald-500" />
                               </div>
                               <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest block mb-1">FSD Progress Update</span>
                               <div className="p-4 bg-white/5 border border-white/5 rounded-2xl text-xs text-slate-300 leading-relaxed font-medium">
-                                 {raw['(FSD) Progress Updated']}
+                                 {getNotionValue(properties, "(FSD) Progress Updated")}
                               </div>
                             </div>
                           )}
@@ -318,7 +354,7 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
                      <div className="text-right">
                         <div className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Rata-rata Nilai Feedback User New</div>
                         <div className="text-6xl font-black text-indigo-500 tracking-tighter drop-shadow-lg flex items-baseline gap-2">
-                           {project.feedback_overall_score || raw['Rata-rata Nilai Feedback User New :'] || '0.0'}
+                           {getNotionValue(properties, "Rata-rata Nilai Feedback User New :") !== '-' ? getNotionValue(properties, "Rata-rata Nilai Feedback User New :") : (project.feedback_overall_score || '0.0')}
                            <span className="text-xl text-indigo-400/40 italic">/ 5.0</span>
                         </div>
                      </div>
@@ -326,15 +362,15 @@ export default function ViewDetailModal({ project, isOpen, onClose }: ViewDetail
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {[
-                      { label: "Pemahaman Kebutuhan Klien", val: raw["Nilai Feedback User : Memahami kebutuhan klien dengan tepat."] },
-                      { label: "Kejelasan Komunikasi", val: raw["Nilai Feedback User :\nKejelasan komunikasi dan mudah dihubungi."] },
-                      { label: "Manajemen Konflik", val: raw["Nilai Feedback User :\nMembantu menyelesaikan konflik di dalam Project."] },
-                      { label: "Keterampilan Teknis & Dok", val: raw["Nilai Feedback User :\nKeterampilan teknis dan dokumentasi Project yang lengkap."] },
-                      { label: "Ketepatan Waktu", val: raw["Nilai Feedback User :\nMemenuhi terget waktu Project."] },
-                      { label: "Kolaborasi Antar Dept", val: raw["Nilai Feedback User :\nDapat berkolaborasi dengan Department lain dengan baik dalam Project"] },
-                      { label: "Review FSD & IT Internal", val: raw["Nilai Feedback User :\nPembuatan FSD dan Review Internal IT"] },
-                      { label: "Development & Fixing", val: raw["Nilai Feedback User :\nDevelopment (include Fixing temuan selama Testing PIC dan SIT)"] },
-                      { label: "UAT & Change Request", val: raw["Nilai Feedback User :\nUAT (include perbaikan temuan UAT) dan Change Request 1"] },
+                      { label: "Pemahaman Kebutuhan Klien", val: getNotionValue(properties, "Nilai Feedback User : Memahami kebutuhan klien dengan tepat.") },
+                      { label: "Kejelasan Komunikasi", val: getNotionValue(properties, "Nilai Feedback User :\nKejelasan komunikasi dan mudah dihubungi.") },
+                      { label: "Manajemen Konflik", val: getNotionValue(properties, "Nilai Feedback User :\nMembantu menyelesaikan konflik di dalam Project.") },
+                      { label: "Keterampilan Teknis & Dok", val: getNotionValue(properties, "Nilai Feedback User :\nKeterampilan teknis dan dokumentasi Project yang lengkap.") },
+                      { label: "Ketepatan Waktu", val: getNotionValue(properties, "Nilai Feedback User :\nMemenuhi terget waktu Project.") },
+                      { label: "Kolaborasi Antar Dept", val: getNotionValue(properties, "Nilai Feedback User :\nDapat berkolaborasi dengan Department lain dengan baik dalam Project") },
+                      { label: "Review FSD & IT Internal", val: getNotionValue(properties, "Nilai Feedback User :\nPembuatan FSD dan Review Internal IT") },
+                      { label: "Development & Fixing", val: getNotionValue(properties, "Nilai Feedback User :\nDevelopment (include Fixing temuan selama Testing PIC dan SIT)") },
+                      { label: "UAT & Change Request", val: getNotionValue(properties, "Nilai Feedback User :\nUAT (include perbaikan temuan UAT) dan Change Request 1") },
                     ].map((item, idx) => (
                       <div key={idx} className="p-4 bg-black/20 rounded-2xl border border-white/5 flex flex-col gap-2">
                         <div className="flex flex-col">
