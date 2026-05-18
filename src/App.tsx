@@ -3,10 +3,13 @@ import ReactDOM from 'react-dom';
 import { useNavigate, Routes, Route, useLocation, useParams, Navigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 
-const handleExcelExport = (data: any[], fileName: string) => {
+const handleExcelExport = (data: any[], fileName: string, merges?: any[], cols?: any[]) => {
   const ws = XLSX.utils.json_to_sheet(data);
+  if (merges) ws['!merges'] = merges;
+  if (cols) ws['!cols'] = cols;
+  
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Data");
+  XLSX.utils.book_append_sheet(wb, ws, "SLA_Report");
   XLSX.writeFile(wb, `${fileName}.xlsx`);
 };
 
@@ -114,7 +117,7 @@ import {
 import { calculateTimelineRange, calculateBarCoordinates, sanitizeDate, normalizeDate, calculateParentRange } from './utils/timelineEngine';
 import { canEditTask } from './utils/permissionHelper';
 import { Task, ViewScale, TaskStatus, ProjectStatus, Project, AppUser, AppView, AuditLog, Schedule, ProjectRescheduleLog, RescheduleRequest, MasterProject, MasterProjectAuditLog, HistoryEditProject } from './types';
-import { cn } from './lib/utils';
+import { cn, calculateTimeliness } from './lib/utils';
 import { getSafeKey } from './utils/keyHelper';
 import ProjectDetail from './components/ProjectDetail';
 
@@ -4625,6 +4628,202 @@ function DashboardStats({ tasks, projects }: { tasks: Task[], projects: Project[
   );
 }
 
+const formatManDays = (totalHours: number) => {
+  if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
+  const days = Math.floor(totalHours / 9); // 9 hours = 1 day
+  const hours = Math.floor(totalHours % 9);
+  const mins = Math.round((totalHours % 1) * 60);
+  return `${days} Days, ${hours} Hours, ${mins} Mins`;
+};
+
+function SlaDetailModal({ isOpen, onClose, type, tasks }: { isOpen: boolean, onClose: () => void, type: string, tasks: any[] }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  const filtered = useMemo(() => {
+    return tasks.filter(t => {
+      // First ensure it matches the timeliness state (FASTER/ON_TIME/LATE)
+      if (calculateTimeliness(t._normEnd, t._normRealized, t._normStatus).state !== type) return false;
+
+      // Then apply search filter
+      const matchesSearch = 
+        t._projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t._taskName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (t._normPic || '').toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // Then apply status filter
+      const matchesStatus = statusFilter === 'ALL' || t._normStatus.toUpperCase() === statusFilter.toUpperCase();
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [tasks, type, searchTerm, statusFilter]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[1001] flex items-center justify-center p-4 md:p-10 pointer-events-none">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-950/80 backdrop-blur-md pointer-events-auto"
+      />
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        className="relative bg-[var(--bg-card)] border border-[var(--border)] w-full max-w-7xl h-full max-h-[90vh] rounded-[2.5rem] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col pointer-events-auto"
+      >
+        <div className="p-8 border-b border-[var(--border)] flex justify-between items-center bg-gradient-to-r from-slate-900 to-slate-950 px-10">
+          <div>
+            <h2 className={cn(
+              "text-4xl font-black italic tracking-tighter uppercase mb-1",
+              type === 'LATE' ? 'text-rose-500' : type === 'FASTER' ? 'text-emerald-500' : 'text-blue-500'
+            )}>
+              {type} Tasks Detail
+            </h2>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest italic opacity-60">Drill-down Task Performance & Timeliness Metrics</p>
+          </div>
+          <button 
+            onClick={onClose}
+            className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-colors group"
+          >
+            <X className="w-6 h-6 text-slate-400 group-hover:text-white transition-colors" />
+          </button>
+        </div>
+
+        {/* SEARCH & FILTER UI */}
+        <div className="flex justify-between items-center bg-gray-900/50 p-6 border-b border-white/5 backdrop-blur-xl">
+          <div className="flex gap-4 w-full max-w-3xl">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <input 
+                type="text" 
+                placeholder="🔍 Cari Project, Task, atau PIC..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="bg-[#0b0c13] border border-white/10 rounded-xl pl-12 pr-4 py-3 text-white text-sm w-full focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-600 font-bold"
+              />
+            </div>
+            <select 
+              value={statusFilter} 
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-[#0b0c13] border border-white/10 rounded-xl px-6 py-3 text-white text-[10px] font-black uppercase tracking-widest focus:border-blue-500 outline-none cursor-pointer hover:bg-slate-900 transition-colors appearance-none min-w-[160px]"
+            >
+              <option value="ALL">All Status</option>
+              <option value="TODO">TODO</option>
+              <option value="IN PROGRESS">IN PROGRESS</option>
+              <option value="DONE">DONE</option>
+              <option value="LIVE">LIVE</option>
+              <option value="CANCEL">CANCEL</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4 md:p-10 bg-[#0b0c13]">
+          <div className="bg-slate-900/30 rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl">
+            <table className="w-full text-left border-collapse table-fixed">
+              <thead>
+                <tr className="bg-slate-950/80 border-b border-white/10">
+                  <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-widest italic w-[15%]">Project Identity</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-white uppercase tracking-widest italic w-[25%]">Task Name</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-widest italic text-center w-[15%]">PIC / Leader</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-widest italic text-center w-[15%]">Differential</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-widest italic text-center w-[10%]">Timeline (Plan)</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-white uppercase tracking-widest italic text-center w-[10%]">Realized Date</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-white uppercase tracking-widest italic text-right w-[10%]">Task Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {filtered.map((t, i) => {
+                  const timeData = calculateTimeliness(t._normEnd, t._normRealized, t._normStatus);
+                  return (
+                    <tr key={i} className="hover:bg-white/[0.03] transition-colors group">
+                      <td className="px-8 py-6">
+                        <div className="flex flex-col overflow-hidden">
+                          <span className="text-[10px] font-mono text-slate-500 mb-0.5 tracking-tighter italic">Source Project</span>
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-tighter truncate">{t._projectName}</span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-black text-white group-hover:text-indigo-400 transition-colors uppercase tracking-tight leading-tight break-words">{t._taskName}</span>
+                          <span className="text-[9px] font-mono text-indigo-400/40">Task ID Ref: {t.id?.split('-')[0] || 'N/A'}</span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6 text-center">
+                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 border border-white/5 rounded-2xl shadow-inner">
+                          <UserIcon className="w-3 h-3 text-indigo-400" />
+                          <span className="text-[11px] font-black italic uppercase tracking-tighter text-slate-300">{t._normPic || '-'}</span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6 text-center">
+                         <span className={cn(
+                           "text-[11px] font-black italic tracking-widest uppercase px-4 py-2 rounded-xl shadow-lg border",
+                           timeData.state === 'LATE' ? 'bg-rose-500/20 text-rose-500 border-rose-500/30' : 
+                           timeData.state === 'FASTER' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 
+                           'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                         )}>
+                           {timeData.text}
+                         </span>
+                      </td>
+                      <td className="px-8 py-6 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-[10px] font-mono text-slate-500 bg-white/5 px-2 py-0.5 rounded italic">{t._normStart ? format(new Date(t._normStart), 'dd MMM yy') : '-'}</span>
+                          <ArrowDown className="w-2 h-2 text-slate-700" />
+                          <span className="text-[10px] font-mono text-rose-500/80 bg-rose-500/5 px-2 py-0.5 rounded italic font-bold">{t._normEnd ? format(new Date(t._normEnd), 'dd MMM yy') : '-'}</span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6 text-center">
+                        <div className="text-[11px] font-black italic text-white uppercase tracking-tighter bg-white/5 py-2 px-4 rounded-2xl border border-white/5">
+                          {t._normRealized ? format(new Date(t._normRealized), 'dd MMM yyyy') : '-'}
+                        </div>
+                      </td>
+                      <td className="px-8 py-6 text-right">
+                        <span className="inline-flex items-center gap-2 px-4 py-2 bg-slate-950 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-300 shadow-xl">
+                          <div className={cn("w-2 h-2 rounded-full animate-pulse", t._normStatus === 'DONE' ? 'bg-emerald-500' : 'bg-amber-500')} />
+                          {t._normStatus || 'TODO'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filtered.length === 0 && (
+              <div className="p-24 text-center flex flex-col items-center gap-6">
+                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center border border-white/10 shadow-inner">
+                  <Info className="w-10 h-10 text-slate-600" />
+                </div>
+                <div>
+                   <p className="text-slate-200 font-black uppercase tracking-[0.3em] text-sm italic mb-2">No tasks matches this state</p>
+                   <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest max-w-sm mx-auto">All systems operational. No records identified in the current filtration parameters.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="p-10 bg-slate-950 border-t border-white/10 flex justify-between items-center px-12">
+           <div className="flex gap-10">
+             <div className="flex flex-col">
+               <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1 italic">Aggregation Results</span>
+               <span className="text-3xl font-black text-white italic tracking-tighter drop-shadow-lg">{filtered.length} <span className="text-xs text-slate-500 font-normal uppercase not-italic tracking-widest ml-2">Identified Tasks</span></span>
+             </div>
+           </div>
+           <button 
+             onClick={onClose}
+             className="px-12 py-4 bg-white text-slate-950 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all active:scale-95 shadow-2xl shadow-white/10"
+           >
+             Close Operational View
+           </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 function PortfolioDashboard({ 
   user,
   projects, 
@@ -4655,6 +4854,9 @@ function PortfolioDashboard({
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [notif, setNotif] = useState<string | null>(null);
   const [masterProjects, setMasterProjects] = useState<MasterProject[]>([]);
+  const [selectedSlaModal, setSelectedSlaModal] = useState<string | null>(null); 
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [globalStatus, setGlobalStatus] = useState('ALL');
   
   useEffect(() => {
     const fetchMasterData = async () => {
@@ -4678,15 +4880,177 @@ function PortfolioDashboard({
     });
   }, [safeProjects]);
 
+  // Aggressive Task Extraction for SLA aggregation with normalization
+  const allTasks = useMemo(() => {
+    if (!tasks || tasks.length === 0) return [];
+    
+    // We only care about L2 tasks (breakdowns) for this SLA monitoring
+    // Level 1 tasks are phases, Level 2 are actual sub-tasks
+    const l2Tasks = tasks.filter(t => t.level === 2);
+
+    return l2Tasks.map(task => {
+      // Find parent project for name mapping
+      const parentProject = safeProjects.find(p => p.id === task.project_id);
+
+      // FAILSAFE NORMALIZATION: Catch every possible DB key variation
+      // @ts-ignore - dynamic keys from various sources
+      const safeEnd = task.end_time || (task as any).end_date || (task as any).end || (task as any).endDate || (task as any).planned_end;
+      // @ts-ignore
+      const safeRealized = task.realized_finish_date || (task as any).realized_date || (task as any).realized_finish || (task as any).realized || (task as any).realizedFinish;
+      // @ts-ignore
+      const safeStart = task.start_time || (task as any).start_date || (task as any).start || (task as any).startDate;
+      // @ts-ignore
+      const safePic = (task as any).pic_name || (task as any).pic || task.assignee || parentProject?.pic_name || parentProject?.leader_email || 'Unassigned';
+
+      // Safely parse Project Name (it might be joined from Supabase)
+      const projName = (task as any).master_projects?.project_name || (task as any).projectName || parentProject?.project_name || 'Unknown Project';
+
+      return {
+        ...task,
+        _normEnd: safeEnd,
+        _normRealized: safeRealized,
+        _normStart: safeStart,
+        _normPic: safePic,
+        _normStatus: task.status || 'TODO',
+        _projectName: projName,
+        _taskName: task.title || (task as any).name || (task as any).task_name || 'Unnamed Task'
+      };
+    }).filter(t => t._normEnd); // Only keep tasks that actually have an end date
+  }, [tasks, safeProjects]);
+
+  // Debugger for SLA Data
+  useEffect(() => {
+    if (allTasks.length > 0) {
+      console.log("=== SLA DEBUGGER ===");
+      console.log("Total Normalized Tasks:", allTasks.length);
+      console.log("Late Count:", allTasks.filter(t => calculateTimeliness(t._normEnd, t._normRealized, t._normStatus).state === 'LATE').length);
+      console.log("Sample Task:", allTasks[0]);
+    }
+  }, [allTasks]);
+
+  // SLA Stats Calculation at Task level
+  const slaStats = useMemo(() => {
+    const stats = { FASTER: 0, ON_TIME: 0, LATE: 0 };
+    allTasks.forEach(t => {
+      const timeliness = calculateTimeliness(t._normEnd, t._normRealized, t._normStatus);
+      if (timeliness.state === 'FASTER') stats.FASTER++;
+      else if (timeliness.state === 'ON_TIME') stats.ON_TIME++;
+      else if (timeliness.state === 'LATE') stats.LATE++;
+    });
+    return stats;
+  }, [allTasks]);
+
   const handleExportProjects = () => {
-    const exportData = safeProjects.map(p => ({
-      'Project Name': p.project_name || 'Untitled',
-      'Lead PIC': p.pic_name || p.leader_email || 'Unassigned',
-      'Start Date': p.start_date || 'N/A',
-      'End Date': p.end_date || 'N/A',
-      'Status': p.status || 'Unknown'
-    }));
-    handleExcelExport(exportData, 'Projects_Summary');
+    // 1. Man Days Formatter (9 Hours = 1 Day)
+    const formatManDaysLocal = (totalHours: number) => {
+      if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
+      const days = Math.floor(totalHours / 9); 
+      const hours = Math.floor(totalHours % 9);
+      const mins = Math.round((totalHours % 1) * 60);
+      return `${days} Days, ${hours} Hours, ${mins} Mins`;
+    };
+
+    const wb = XLSX.utils.book_new();
+
+    safeProjects.forEach(project => {
+      let fsdHours = 0, devHours = 0, sitHours = 0;
+      const excelData: any[] = [];
+      const merges: any[] = [];
+      let currentRow = 6; // JSON data will start at row 7 (index 6)
+
+      const p = project as any;
+      const phases = p.tasks || p.breakdowns || p.phases || p.l1_tasks || [];
+
+      phases.forEach((phase: any) => {
+        const phaseName = (phase.title || phase.name || '').toUpperCase();
+        const items = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [];
+        const tasksToExport = items.length > 0 ? items : [{}];
+        const taskCount = tasksToExport.length;
+
+        tasksToExport.forEach((task: any) => {
+          const hours = parseFloat(task.man_hours || task.hours) || 0;
+          const mins = hours * 60;
+
+          if (phaseName.includes('FSD')) fsdHours += hours;
+          else if (phaseName.includes('DEV')) devHours += hours;
+          else if (phaseName.includes('SIT')) sitHours += hours;
+
+          // EXACT 13 FIELDS
+          excelData.push({
+            "Project Name": project.project_name || '-',
+            "Phase L1": phase.title || phase.name || '-',
+            "Task": task.title || task.name || '-',
+            "Type Task": task.type_task || task.type || '-',
+            "Components": task.components || '-',
+            "Detail Breakdown": task.detail_breakdown || task.detail || '-',
+            "Man Hours": hours ? `${hours} h` : '-',
+            "Man Hours (In Minutes)": mins ? `${mins} m` : '-',
+            "Start Date": task.start_time || task.start_date || '-',
+            "End Date": task.end_time || task.end_date || '-',
+            "Status": task.status || 'TODO',
+            "Fachrul Feedback": (task as any).fachrul_feedback || '-',
+            "Barra Feedback": (task as any).barra_feedback || '-'
+          });
+        });
+
+        // Merges for Phase L1 (Col B) & Project Name (Col A)
+        if (taskCount > 1) {
+          merges.push({ s: { r: currentRow, c: 1 }, e: { r: currentRow + taskCount - 1, c: 1 } }); 
+          merges.push({ s: { r: currentRow, c: 0 }, e: { r: currentRow + taskCount - 1, c: 0 } }); 
+        }
+        currentRow += taskCount;
+      });
+
+      // 3. EXACT Top Headers Injection
+      const topHeaders = [
+        [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], // Row 1
+        [], // Row 2
+        [`Project Name:`, project.project_name || '-', ``, `Global Status:`, project.status || 'TODO', ``, `Total Man days FSD:`, formatManDaysLocal(fsdHours)], // Row 3
+        [`Start Date:`, project.start_date || '-', ``, `Total Man Hours:`, `${(project as any).total_man_hours || (project as any).man_hours || 0} Hours`, ``, `Total Man days DEV:`, formatManDaysLocal(devHours)], // Row 4
+        [`End Date:`, project.end_date || '-', ``, `PIC:`, project.pic_name || (project as any).pic || '-', ``, `Total Man days SIT:`, formatManDaysLocal(sitHours)], // Row 5
+        [] // Row 6
+      ];
+
+      // 4. Create Worksheet
+      const ws = XLSX.utils.aoa_to_sheet(topHeaders);
+      merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } }); // Title merge
+
+      // 5. Append JSON Data
+      XLSX.utils.sheet_add_json(ws, excelData, { origin: "A7" });
+
+      // 6. Apply Merges and strict Column Widths
+      ws['!merges'] = merges;
+      ws['!cols'] = [
+        { wch: 25 }, // A: Project Name
+        { wch: 15 }, // B: Phase L1
+        { wch: 50 }, // C: Task
+        { wch: 15 }, // D: Type Task
+        { wch: 25 }, // E: Components
+        { wch: 65 }, // F: Detail Breakdown
+        { wch: 12 }, // G: Man Hours
+        { wch: 22 }, // H: Man Hours (In Minutes)
+        { wch: 15 }, // I: Start Date
+        { wch: 15 }, // J: End Date
+        { wch: 15 }, // K: Status
+        { wch: 35 }, // L: Fachrul Feedback
+        { wch: 35 }  // M: Barra Feedback
+      ];
+
+      // 7. Force Text Wrap Styling on all populated cells
+      for (const cell in ws) {
+        if (cell[0] === '!') continue; // Skip metadata
+        // @ts-ignore
+        ws[cell].s = { 
+          alignment: { wrapText: true, vertical: "top" },
+          font: { name: "Arial", sz: 10 }
+        };
+      }
+
+      const sheetName = (project.project_name || 'Project').substring(0, 31).replace(/[\[\]\?\*\\\/]/g, '');
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+
+    XLSX.writeFile(wb, `Om_Dedy_Timeline_Deep_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -4720,6 +5084,76 @@ function PortfolioDashboard({
       
       {!loading && <DashboardStats tasks={tasks} projects={projects} />}
       
+      {!loading && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6 mb-8">
+          <motion.div 
+            whileHover={{ y: -8, scale: 1.02 }}
+            onClick={() => setSelectedSlaModal('FASTER')} 
+            className="cursor-pointer bg-[#0b0c13] border border-emerald-500/50 p-6 rounded-[2rem] hover:bg-emerald-500/5 transition-all group overflow-hidden relative shadow-2xl flex justify-between items-center"
+          >
+            <div className="absolute -top-4 -right-4 p-8 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity rotate-12">
+               <Rocket className="w-24 h-24 text-emerald-500" />
+            </div>
+            <div>
+              <h3 className="text-emerald-400 font-black text-xs tracking-[0.2em] uppercase mb-1 drop-shadow-sm">Faster Tasks</h3>
+              <p className="text-5xl font-black text-white italic tracking-tighter drop-shadow-lg">
+                {slaStats.FASTER}
+              </p>
+            </div>
+            <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 shadow-inner group-hover:scale-110 transition-transform">
+              <span className="text-emerald-500 text-2xl drop-shadow-lg">⚡</span>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            whileHover={{ y: -8, scale: 1.02 }}
+            onClick={() => setSelectedSlaModal('ON_TIME')} 
+            className="cursor-pointer bg-[#0b0c13] border border-blue-500/50 p-6 rounded-[2rem] hover:bg-blue-500/5 transition-all group overflow-hidden relative shadow-2xl flex justify-between items-center"
+          >
+            <div className="absolute -top-4 -right-4 p-8 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity rotate-12">
+               <Zap className="w-24 h-24 text-blue-500" />
+            </div>
+            <div>
+              <h3 className="text-blue-400 font-black text-xs tracking-[0.2em] uppercase mb-1 drop-shadow-sm">On Time Tasks</h3>
+              <p className="text-5xl font-black text-white italic tracking-tighter drop-shadow-lg">
+                {slaStats.ON_TIME}
+              </p>
+            </div>
+            <div className="p-4 bg-blue-500/10 rounded-2xl border border-blue-500/20 shadow-inner group-hover:scale-110 transition-transform">
+              <span className="text-blue-500 text-2xl drop-shadow-lg">✅</span>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            whileHover={{ y: -8, scale: 1.02 }}
+            onClick={() => setSelectedSlaModal('LATE')} 
+            className="cursor-pointer bg-[#0b0c13] border border-rose-500/50 p-6 rounded-[2rem] hover:bg-rose-500/5 transition-all group overflow-hidden relative shadow-2xl flex justify-between items-center"
+          >
+            <div className="absolute -top-4 -right-4 p-8 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity rotate-12">
+               <AlertTriangle className="w-24 h-24 text-rose-500" />
+            </div>
+            <div>
+              <h3 className="text-rose-500 font-black text-xs tracking-[0.2em] uppercase mb-1 drop-shadow-sm">Late Tasks</h3>
+              <p className="text-5xl font-black text-white italic tracking-tighter drop-shadow-lg">
+                {slaStats.LATE}
+              </p>
+            </div>
+            <div className="p-4 bg-rose-500/10 rounded-2xl border border-rose-500/20 shadow-inner group-hover:scale-110 transition-transform">
+              <span className="text-rose-500 text-2xl drop-shadow-lg">⚠️</span>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {selectedSlaModal && (
+        <SlaDetailModal 
+          isOpen={!!selectedSlaModal} 
+          onClose={() => setSelectedSlaModal(null)} 
+          type={selectedSlaModal} 
+          tasks={allTasks} 
+        />
+      )}
+      
       {loading ? (
         <div className="h-64 flex flex-col items-center justify-center gap-4 bg-white/50 dark:bg-slate-900/20 rounded-3xl border border-slate-200 dark:border-slate-800/50 shadow-sm transition-colors">
            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
@@ -4740,11 +5174,54 @@ function PortfolioDashboard({
             description="Are you sure you want to remove this project? All associated tasks and audit trails will be archived."
           />
 
+          {/* GLOBAL SEARCH & FILTER BAR */}
+          <div className="flex flex-col md:flex-row gap-4 mb-6 mt-8 bg-[#0b0c13] p-4 rounded-xl border border-gray-800 shadow-lg">
+            <div className="flex-1 relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <input 
+                type="text" 
+                placeholder="🔍 Cari Nama Project atau PIC..." 
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-12 pr-4 py-3 text-white text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all font-bold"
+              />
+            </div>
+            <div className="w-full md:w-64">
+              <select 
+                value={globalStatus} 
+                onChange={(e) => setGlobalStatus(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:border-blue-500 outline-none cursor-pointer font-black uppercase tracking-widest appearance-none"
+              >
+                <option value="ALL">Semua Status Project</option>
+                <option value="TODO">TODO</option>
+                <option value="ON QUEUE">ON QUEUE</option>
+                <option value="FSD ON PROGRESS">FSD ON PROGRESS</option>
+                <option value="DEV ON PROGRESS">DEV ON PROGRESS</option>
+                <option value="UAT">UAT</option>
+                <option value="LIVE">LIVE</option>
+              </select>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {(() => {
-              const safeProjects = projects || [];
               const uniqueProjects = Array.from(new Map(mergedProjects.filter(p => !!p).map(p => [p.id, p])).values());
-              if (uniqueProjects.length === 0) {
+              const filteredProjects = uniqueProjects.filter(project => {
+                // 1. Status Filter
+                if (globalStatus !== 'ALL' && (project.status || '').toUpperCase() !== globalStatus) return false;
+
+                // 2. Search Filter (By Project Name or PIC)
+                if (globalSearch) {
+                  const searchLower = globalSearch.toLowerCase();
+                  const matchName = (project.project_name || '').toLowerCase().includes(searchLower);
+                  const matchPic = (project.pic_name || '').toLowerCase().includes(searchLower) || (project.leader_email || '').toLowerCase().includes(searchLower);
+                  return matchName || matchPic;
+                }
+
+                return true;
+              });
+
+              if (filteredProjects.length === 0) {
                 return (
                   <div className="col-span-full flex flex-col items-center justify-center py-20 px-8 bg-white/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 border-dashed rounded-3xl text-center space-y-4 transition-colors">
                     <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800/50 rounded-2xl flex items-center justify-center">
@@ -4757,7 +5234,7 @@ function PortfolioDashboard({
                   </div>
                 );
               }
-              return uniqueProjects.map((p, i) => {
+              return filteredProjects.map((p, i) => {
                 const combinedKey = getSafeKey(p, i, 'portfolio-project');
                 return (
                   <motion.div
@@ -9556,9 +10033,32 @@ function GanttBar({ user, task, tasks, projects, setTasks, scale, gridStart, gri
     window.addEventListener('pointerup', handleUp);
   };
 
+  // Timeliness Stats
   const isApproved = task.status === TaskStatus.DONE;
   const health = getTaskHealth(task);
-  const timeProgress = Math.min(100, Math.max(0, ((new Date().getTime() - fromMs) / (toMs - fromMs)) * 100));
+  const timeProgress = Math.min(100, Math.max(0, ((new Date().getTime() - fromMs!) / (toMs! - fromMs!)) * 100));
+  
+  // Normalized timeliness assessment
+  const safeEnd = task.end_time || (task as any).end_date || (task as any).end;
+  const safeRealized = task.realized_finish_date || (task as any).realized_date;
+  const timeStats = calculateTimeliness(safeEnd, safeRealized, task.status);
+
+  // Strict Background Color Selection - NO COMBINATION
+  let barColorClass = "";
+  if (timeStats.state === 'LATE') {
+    barColorClass = "bg-gradient-to-r from-red-600 to-rose-700 shadow-red-900/50 ring-2 ring-red-500/30";
+  } else if (isApproved) {
+    barColorClass = "bg-gradient-to-r from-emerald-500 to-teal-600 opacity-80";
+  } else if (health === 'OVERDUE') {
+    barColorClass = "bg-gradient-to-r from-rose-500 to-red-700 shadow-rose-500/40";
+  } else if (timeStats.state === 'FASTER') {
+    barColorClass = "bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-emerald-900/30";
+  } else {
+    // Default Phase Colors
+    barColorClass = isLevel1 || isProjectBar 
+      ? "bg-gradient-to-r from-purple-600 to-indigo-600 shadow-[0_0_20px_rgba(124,58,237,0.3)]" 
+      : "bg-gradient-to-r from-cyan-400 to-blue-500 shadow-[0_0_15px_rgba(34,211,238,0.2)]";
+  }
 
   return (
     <div key={`${task.id}-${index}`} className={cn("relative flex items-center w-full", isProjectBar ? "h-16" : (isLevel1 ? "h-14" : "h-10"))}>
@@ -9581,13 +10081,9 @@ function GanttBar({ user, task, tasks, projects, setTasks, scale, gridStart, gri
           }
         }}
         className={cn(
-          "absolute rounded-lg flex items-center px-4 shadow-xl select-none transition-all duration-300",
-          isLevel1 || isProjectBar 
-            ? "h-10 border border-white/10 bg-gradient-to-r from-purple-600 to-indigo-600 shadow-[0_0_20px_rgba(124,58,237,0.3)]" 
-            : "h-6 border border-white/10 bg-gradient-to-r from-cyan-400 to-blue-500 shadow-[0_0_15px_rgba(34,211,238,0.2)]",
+          "absolute rounded-lg flex items-center px-4 shadow-xl select-none transition-all duration-300 border border-white/10",
+          barColorClass,
           isDragging && "ring-2 ring-white/50 z-[100]",
-          isApproved && "from-emerald-500 to-teal-600 opacity-80",
-          health === 'OVERDUE' && "from-rose-500 to-red-700 shadow-rose-500/40",
           "hover:backdrop-brightness-110 active:scale-[0.98] cursor-pointer"
         )}
       >
@@ -9620,6 +10116,13 @@ function GanttBar({ user, task, tasks, projects, setTasks, scale, gridStart, gri
                   <h4 className="text-[11px] font-black text-indigo-400 uppercase tracking-widest">{task.title || task.custom_id}</h4>
                   <HealthBadge health={health} />
                 </div>
+
+                <div className="mt-2 pt-2 border-t border-slate-800">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">SLA Efficiency Status</p>
+                  <p className={cn("font-bold text-[10px] uppercase tracking-tighter", timeStats.textColor)}>
+                    {timeStats.label} ({timeStats.text})
+                  </p>
+                </div>
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -9640,6 +10143,13 @@ function GanttBar({ user, task, tasks, projects, setTasks, scale, gridStart, gri
                   <div className="h-2 bg-slate-800/50 rounded-full overflow-hidden border border-white/5">
                     <div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 shadow-[0_0_10px_#6366f1]" style={{ width: `${timeProgress}%` }} />
                   </div>
+                </div>
+
+                <div className="mt-2 pt-2 border-t border-slate-800">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">SLA STATUS:</p>
+                  <p className={cn("font-bold text-[10px] uppercase", timeStats.textColor)}>
+                    {timeStats.label} ({timeStats.text})
+                  </p>
                 </div>
 
                 <div className="pt-3 border-t border-slate-800 flex justify-between items-center">
