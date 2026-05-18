@@ -9,8 +9,7 @@ import * as XLSX from 'xlsx-js-style';
 export const exportToExcel = async (
   project: any, 
   hierarchicalPhases: any[],
-  setIsExcelLoading: (loading: boolean) => void,
-  setExcelEmbedUrl: (url: string | null) => void
+  setIsExcelLoading: (loading: boolean) => void
 ) => {
   if (!project || !hierarchicalPhases) {
     console.error("Export failed: Missing project or phases data");
@@ -239,7 +238,8 @@ export const exportToExcel = async (
 
     const result = await response.json();
     if (result.success && result.embedUrl) {
-      setExcelEmbedUrl(result.embedUrl);
+      // FIX: Safely open the M365 Excel link in a new browser tab
+      window.open(result.embedUrl, '_blank', 'noopener,noreferrer');
     } else {
       alert("Gagal memuat Excel dari Microsoft 365.");
     }

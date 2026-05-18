@@ -7103,7 +7103,6 @@ function GanttDetailView({
 
   const [activeView, setActiveView] = useState<'INFRASTRUCTURE' | 'SYSTEM_LOG' | 'HISTORY_EDIT'>('INFRASTRUCTURE');
   const [isExcelLoading, setIsExcelLoading] = useState(false);
-  const [excelEmbedUrl, setExcelEmbedUrl] = useState<string | null>(null);
   const [rescheduleLogs, setRescheduleLogs] = useState<ProjectRescheduleLog[]>([]);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   
@@ -7476,7 +7475,7 @@ function GanttDetailView({
     if (!currentProject) return;
     
     // Pass the hierarchical project tree roots to the new export utility
-    await exportToExcel(currentProject, projectTree.roots, setIsExcelLoading, setExcelEmbedUrl);
+    await exportToExcel(currentProject, projectTree.roots, setIsExcelLoading);
   };
 
   if (!projectTree || !projectTree.roots || (projectTree.roots.length === 0 && !isGlobalView)) {
@@ -7837,28 +7836,9 @@ function GanttDetailView({
              </div>
            </div>
          </div>
-        {excelEmbedUrl && (
-          <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 md:p-8">
-            <div className="bg-[#0b0c13] w-full h-full max-w-7xl rounded-2xl border border-gray-700 shadow-2xl flex flex-col overflow-hidden">
-              <div className="flex justify-between items-center px-6 py-4 bg-gray-900 border-b border-gray-800">
-                <div className="flex items-center gap-3">
-                  <span className="bg-blue-600 p-1.5 rounded-md text-white">📊</span>
-                  <div>
-                    <h3 className="text-white font-bold">Live Excel Collaboration (M365)</h3>
-                    <p className="text-gray-400 text-xs">Perubahan otomatis tersimpan ke Cloud.</p>
-                  </div>
-                </div>
-                <button onClick={() => setExcelEmbedUrl(null)} className="text-gray-400 hover:text-white bg-gray-800 hover:bg-red-600 p-2 rounded-lg transition-colors">Tutup Editor</button>
-              </div>
-              <div className="flex-1 w-full bg-white">
-                <iframe src={excelEmbedUrl} width="100%" height="100%" frameBorder="0" scrolling="no" allowFullScreen title="M365 Editor"></iframe>
-              </div>
-            </div>
-          </div>
-        )}
-       </motion.div>
-       </AnimatePresence>
-    </div>
+        </motion.div>
+        </AnimatePresence>
+     </div>
   );
 }
 
