@@ -1,230 +1,187 @@
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import * as XLSX from 'xlsx-js-style';
 import { format } from 'date-fns';
-import { PHASE_ORDER } from '../constants';
 
 /**
- * Higher-order export utility for Om Dedy Dashboard
- * Generates a management-ready styled XLSX report
+ * Enhanced export utility for Om Dedy Dashboard
+ * Generates an EXACT layout using AOA and xlsx-js-style
  */
-export const exportToExcel = async (project: any, tasks: any[]) => {
-  if (!project || !tasks) {
-    console.error("Export failed: Missing project or tasks data");
+export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
+  if (!project || !hierarchicalPhases) {
+    console.error("Export failed: Missing project or phases data");
     return;
   }
 
-  // 1. Sort tasks chronologically by PHASE_ORDER
-  const sortedTasks = [...tasks].sort((a, b) => {
-    const phaseA = (a.phase_type || a.title || a.name || '').toUpperCase();
-    const phaseB = (b.phase_type || b.title || b.name || '').toUpperCase();
-    
-    // Check if the title starts with one of the phases
-    const getOrder = (p: string) => {
-       for (const key in PHASE_ORDER) {
-          if (p.includes(key)) return PHASE_ORDER[key];
-       }
-       return 99;
-    };
-
-    const orderA = getOrder(phaseA);
-    const orderB = getOrder(phaseB);
-    
-    if (orderA !== orderB) return orderA - orderB;
-    
-    // Secondary sort by date if same phase or unknown
-    return new Date(a.start_time || a.plan_start_date).getTime() - new Date(b.start_time || b.plan_start_date).getTime();
-  });
-
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('Timeline Approval');
-
-  // 1. SET COLUMN WIDTHS
-  sheet.columns = [
-    { header: 'Project Name', key: 'projectName', width: 30 },
-    { header: 'Phase L1', key: 'phaseL1', width: 25 },
-    { header: 'Task', key: 'task', width: 35 },
-    { header: 'Type Task', key: 'taskType', width: 20 },
-    { header: 'Components', key: 'components', width: 30 },
-    { header: 'Detail Breakdown', key: 'detail', width: 40 },
-    { header: 'Man Hours', key: 'manHours', width: 15 },
-    { header: 'Man Hours (In Minutes)', key: 'manHoursMin', width: 22 },
-    { header: 'Start Date', key: 'planStart', width: 18 },
-    { header: 'End Date', key: 'planEnd', width: 18 },
-    { header: 'Status', key: 'status', width: 20 },
-    { header: 'Fachrul Feedback', key: 'feedback1', width: 30 },
-    { header: 'Barra Feedback', key: 'feedback2', width: 30 },
-  ];
-
-  // 2. ADD TITLE
-  sheet.mergeCells('A1:M1');
-  const titleCell = sheet.getCell('A1');
-  titleCell.value = 'OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT';
-  titleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FF1E3A8A' } };
-  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-
-  sheet.addRow([]); // Row 2 Spacer
-
-  // 3. ADD SUMMARY INFO
-  const addSummaryRow = (label1: string, val1: string, label2: string, val2: string) => {
-    const row = sheet.addRow([label1, val1, '', label2, val2]);
-    row.getCell(1).font = { bold: true };
-    row.getCell(4).font = { bold: true };
-    sheet.mergeCells(`B${row.number}:C${row.number}`);
-    sheet.mergeCells(`E${row.number}:M${row.number}`);
-    return row;
-  };
-
-  // Helper to format date safely
-  const formatDate = (date: any) => {
-    if (!date) return '-';
+  // 1. New Clean Date Formatter Utility
+  const formatDate = (dateStr: any) => {
+    if (!dateStr || dateStr === '-') return '-';
     try {
-      return format(new Date(date), 'MMM dd, yyyy');
-    } catch {
-      return date.toString();
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr; // Return as-is if already formatted
+      
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+    } catch (e) {
+      return dateStr;
     }
   };
 
-  // Calculate total man hours dynamically
-  const totalHours = tasks.reduce((sum, task) => sum + (parseFloat(task.man_hours) || 0), 0);
+  // 2. Man Days Formatter (9 Hours = 1 Day Rule)
+  const formatManDays = (totalHours: number) => {
+    if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
+    const days = Math.floor(totalHours / 9); 
+    const hours = Math.floor(totalHours % 9);
+    const mins = Math.round((totalHours % 1) * 60);
+    return `${days} Days, ${hours} Hours, ${mins} Mins`;
+  };
 
-  addSummaryRow(
-    'Project Name', 
-    project.project_name || project.name || 'UNTITLED PROJECT', 
-    'Global Status', 
-    project.global_status || project.status || 'TO DO'
-  ); // Row 3
-  addSummaryRow(
-    'Start Date', 
-    formatDate(project.plan_start_date || project.start_date), 
-    'Total Man Hours', 
-    `${totalHours.toFixed(1)} Hours`
-  ); // Row 4
-  addSummaryRow(
-    'End Date', 
-    formatDate(project.plan_end_date || project.end_date), 
-    'PIC', 
-    project.pic_name || project.leader_email || 'Unassigned'
-  ); // Row 5
-  
-  sheet.addRow([]); // Row 6 Spacer before table
+  let fsdHours = 0, devHours = 0, sitHours = 0;
+  const phasesList = hierarchicalPhases || [];
 
-  // 4. ADD TABLE HEADERS
-  const headerRow = sheet.addRow([
-    'Project Name', 'Phase L1', 'Task', 'Type Task', 'Components', 'Detail Breakdown', 'Man Hours', 'Man Hours (In Minutes)', 'Start Date', 'End Date', 'Status', 'Fachrul Feedback', 'Barra Feedback'
-  ]); // Row 7
-  
-  headerRow.eachCell((cell) => {
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } }; // Dark Blue
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = { top: { style:'thin' }, left: { style:'thin' }, bottom: { style:'thin' }, right: { style:'thin' } };
+  // Calculate True Total Hours from L2 Tasks Only
+  phasesList.forEach((phase) => {
+    const phaseName = (phase.title || phase.name || '').toUpperCase();
+    const tasks = phase.children || phase.tasks || [];
+    
+    tasks.forEach((task: any) => {
+      const hours = parseFloat(task.man_hours || task.hours) || 0;
+      if (phaseName.includes('FSD')) fsdHours += hours;
+      else if (phaseName.includes('DEV')) devHours += hours;
+      else if (phaseName.includes('SIT')) sitHours += hours;
+    });
   });
 
-  // 5. ADD DATA ROWS WITH hierarchy logic
-  const l1Phases = sortedTasks.filter(t => !t.parent_id);
-  const l2Tasks = sortedTasks.filter(t => t.parent_id);
+  const trueTotalHours = fsdHours + devHours + sitHours;
 
-  const dataStartRow = 8;
-  let currentRow = dataStartRow;
+  // 3. Build Sheet Matrix (AOA) with Formatted Dates
+  const aoa: any[][] = [
+    [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], // Row 1 (Index 0)
+    [], // Row 2 (Index 1)
+    [`Project Name`, project.project_name || project.name || '-', ``, `Global Status`, project.status || 'TODO'], // Row 3
+    [`Start Date`, formatDate(project.start_date), ``, `Total Man Hours`, `${trueTotalHours} Hours`], // Row 4 (FORMATTED)
+    [`End Date`, formatDate(project.end_date), ``, `PIC`, project.pic_name || project.pic || '-'], // Row 5 (FORMATTED)
+    [], // Row 6
+    [`Total Man days FSD:`, formatManDays(fsdHours)], // Row 7
+    [`Total Man days DEV:`, formatManDays(devHours)], // Row 8
+    [`Total Man days SIT:`, formatManDays(sitHours)], // Row 9
+    [], // Row 10
+    [ // Row 11 (Index 10): MAIN TABLE HEADERS
+      "Project Name", "Phase L1", "Task", "Type Task", "Components", 
+      "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
+      "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
+    ]
+  ];
 
-  l1Phases.forEach(l1 => {
-    const l1Status = (l1.current_status || l1.status || 'TO DO').toUpperCase();
-    const l1Hours = parseFloat(l1.man_hours) || 0;
-    const l1Minutes = l1Hours * 60;
+  const merges: any[] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } } // Merge Title Bar
+  ];
 
-    // Add L1 Row
-    const rowL1 = sheet.addRow([
-      project.project_name || project.name || '-',
-      l1.phase_type || l1.title || l1.name || '-',
-      '-', // Task (L2)
-      '', // Type Task (Empty for L1)
-      '', // Components (Empty for L1)
-      '', // Detail Breakdown (Empty for L1 per requirement)
-      `${l1Hours} h`,
-      `${l1Minutes} m`,
-      formatDate(l1.plan_start_date || l1.start_time),
-      formatDate(l1.plan_end_date || l1.end_time),
-      l1Status,
-      l1.fachrul_feedback || l1.suggestion_fachrul || '-',
-      l1.barra_feedback || l1.suggestion_barra || '-'
-    ]);
-    currentRow++;
+  let currentRow = 11; 
 
-    rowL1.eachCell((cell, colNumber) => {
-        cell.border = { top: { style:'thin' }, left: { style:'thin' }, bottom: { style:'thin' }, right: { style:'thin' } };
-        cell.alignment = { vertical: 'middle' };
-        if (colNumber >= 7 && colNumber <= 10) cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        if (colNumber === 11) {
-            cell.font = { bold: true };
-            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  phasesList.forEach((phase) => {
+    const tasks = phase.children && phase.children.length > 0 ? phase.children : [{}];
+    const taskCount = tasks.length;
+    const startRow = currentRow; 
+
+    tasks.forEach((task: any) => {
+      const hours = parseFloat(task.man_hours || task.hours) || 0;
+      const mins = hours * 60;
+
+      aoa.push([
+        project.project_name || project.name || '-',
+        phase.title || phase.name || '-',
+        task.title || task.name || '-',
+        task.task_type || task.type || '-',
+        (Array.isArray(task.components) ? task.components.join(', ') : task.components) || '-',
+        task.detail_task || task.detail || '-',
+        hours ? `${hours} h` : '-',
+        mins ? `${mins} m` : '-',
+        formatDate(task.start_time || task.start_date), // Row Data Start Date (FORMATTED)
+        formatDate(task.end_time || task.end_date),   // Row Data End Date (FORMATTED)
+        task.status || 'TODO',
+        task.suggestion_fachrul || task.fachrul_feedback || '-',
+        task.suggestion_barra || task.barra_feedback || '-'
+      ]);
+      currentRow++;
+    });
+
+    if (taskCount > 1) {
+      merges.push({ s: { r: startRow, c: 1 }, e: { r: startRow + taskCount - 1, c: 1 } }); // Merge Phase L1
+      merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow + taskCount - 1, c: 0 } }); // Merge Project Name
+    }
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = merges;
+
+  // Set Column Widths
+  ws['!cols'] = [
+    { wch: 25 }, { wch: 15 }, { wch: 45 }, { wch: 15 }, { wch: 25 }, 
+    { wch: 65 }, { wch: 12 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, 
+    { wch: 15 }, { wch: 35 }, { wch: 35 }
+  ];
+
+  // Define Reuseable Borders
+  const borderDef = {
+    top: { style: "thin", color: { rgb: "D9D9D9" } },
+    bottom: { style: "thin", color: { rgb: "D9D9D9" } },
+    left: { style: "thin", color: { rgb: "D9D9D9" } },
+    right: { style: "thin", color: { rgb: "D9D9D9" } }
+  };
+
+  // 3. APPLY PREMIUM RENDERING STYLES DYNAMICALLY
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
+      if (!ws[cellRef]) continue;
+
+      if (R === 0) { // Main Title
+        ws[cellRef].s = {
+          fill: { fgColor: { rgb: "1F4E78" } },
+          font: { name: "Arial", sz: 14, bold: true, color: { rgb: "FFFFFF" } },
+          alignment: { horizontal: "center", vertical: "center" }
+        };
+      } else if ((R >= 2 && R <= 4) || (R >= 6 && R <= 8)) { // Metadata
+        ws[cellRef].s = {
+          font: { name: "Arial", sz: 10, bold: C === 0 || C === 3 || C === 6 },
+          alignment: { vertical: "center" },
+          border: (R === 4 || R === 8) ? { bottom: { style: "thin", color: { rgb: "D9D9D9" } } } : undefined
+        };
+      } else if (R === 10) { // Table Headers
+        ws[cellRef].s = {
+          fill: { fgColor: { rgb: "2F5597" } },
+          font: { name: "Arial", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          border: borderDef
+        };
+      } else if (R >= 11) { // Data Rows
+        if (C === 1 || C === 0) { // Center alignment for Project Name & Phase L1
+          ws[cellRef].s = {
+            fill: C === 1 ? { fgColor: { rgb: "F2F2F5" } } : undefined,
+            font: { name: "Arial", sz: 10, bold: C === 1 },
+            alignment: { horizontal: "center", vertical: "center", wrapText: true },
+            border: borderDef
+          };
+        } else if (C === 8 || C === 9 || C === 10) { // Center alignment for Dates & Status columns
+          ws[cellRef].s = {
+            font: { name: "Arial", sz: 10 },
+            alignment: { horizontal: "center", vertical: "top", wrapText: true },
+            border: borderDef
+          };
+        } else { // Top-left alignment for Text-heavy columns
+          ws[cellRef].s = {
+            font: { name: "Arial", sz: 10 },
+            alignment: { vertical: "top", wrapText: true },
+            border: borderDef
+          };
         }
-        // Bold L1 rows for visual hierarchy
-        cell.font = { ...cell.font, bold: true };
-    });
-
-    // Add L2 Children
-    const children = l2Tasks.filter(t => t.parent_id === l1.id);
-    children.forEach(l2 => {
-        const l2Status = (l2.current_status || l2.status || 'TO DO').toUpperCase();
-        const l2Hours = parseFloat(l2.man_hours) || 0;
-        const l2Minutes = l2Hours * 60;
-
-        const rowL2 = sheet.addRow([
-            project.project_name || project.name || '-',
-            '', // Phase (L1) (blank for subrows)
-            l2.title || l2.name || '-',
-            l2.task_type || '-',
-            (l2.components || []).join(', ') || '-',
-            l2.detail_task || '-',
-            `${l2Hours} h`,
-            `${l2Minutes} m`,
-            formatDate(l2.plan_start_date || l2.start_time),
-            formatDate(l2.plan_end_date || l2.end_time),
-            l2Status,
-            l2.fachrul_feedback || l2.suggestion_fachrul || '-',
-            l2.barra_feedback || l2.suggestion_barra || '-'
-        ]);
-        currentRow++;
-
-        rowL2.eachCell((cell, colNumber) => {
-            cell.border = { top: { style:'thin' }, left: { style:'thin' }, bottom: { style:'thin' }, right: { style:'thin' } };
-            cell.alignment = { vertical: 'middle' };
-            if (colNumber >= 7 && colNumber <= 10) cell.alignment = { horizontal: 'center', vertical: 'middle' };
-            
-            // Status Coloring Logic
-            if (colNumber === 11) {
-              cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-              const stat = l2Status;
-              if (stat.includes('DONE') || stat.includes('EARLY') || stat.includes('LIVE')) {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } }; // Emerald Green
-              } else if (stat.includes('PROGRESS') || stat.includes('REVIEW')) {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } }; // Blue
-              } else if (stat.includes('LATE') || stat.includes('OVERDUE')) {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEF4444' } }; // Red
-              } else {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B7280' } }; // Gray (To Do/Hold/Cancel)
-              }
-              cell.alignment = { horizontal: 'center', vertical: 'middle' };
-            }
-        });
-    });
-  });
-
-  // Dynamic Vertical Merge for Project Name (Column A)
-  const endRow = currentRow - 1;
-  if (endRow >= dataStartRow) {
-    sheet.mergeCells(`A${dataStartRow}:A${endRow}`);
-    const projectCell = sheet.getCell(`A${dataStartRow}`);
-    projectCell.value = project.project_name || project.name || 'UNTITLED PROJECT';
-    projectCell.alignment = { vertical: 'middle', horizontal: 'center' };
+      }
+    }
   }
 
-  // 6. GENERATE & DOWNLOAD
-  const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  
-  // Format filename: OM_DEDY_Timeline_PROJECT_NAME.xlsx
-  const projectName = project.project_name || project.name || 'Export';
-  const safeProjectName = projectName.toString().replace(/[^a-zA-Z0-9]/g, '_');
-  saveAs(blob, `OM_DEDY_Timeline_${safeProjectName}.xlsx`);
+  // Build and Trigger Download
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
+  XLSX.writeFile(wb, `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}.xlsx`);
 };
+

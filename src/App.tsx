@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, Component, ErrorInfo, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate, Routes, Route, useLocation, useParams, Navigate } from 'react-router-dom';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 
 const handleExcelExport = (data: any[], fileName: string, merges?: any[], cols?: any[]) => {
   const ws = XLSX.utils.json_to_sheet(data);
@@ -4941,8 +4941,21 @@ function PortfolioDashboard({
   }, [allTasks]);
 
   const handleExportProjects = () => {
-    // 1. Man Days Formatter (9 Hours = 1 Day)
-    const formatManDaysLocal = (totalHours: number) => {
+    // 1. New Clean Date Formatter Utility
+    const formatDate = (dateStr: any) => {
+      if (!dateStr || dateStr === '-') return '-';
+      try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return dateStr;
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+      } catch (e) {
+        return dateStr;
+      }
+    };
+
+    // 2. Man Days Formatter (9 Hours = 1 Day)
+    const formatManDays = (totalHours: number) => {
       if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
       const days = Math.floor(totalHours / 9); 
       const hours = Math.floor(totalHours % 9);
@@ -4954,81 +4967,98 @@ function PortfolioDashboard({
 
     safeProjects.forEach(project => {
       let fsdHours = 0, devHours = 0, sitHours = 0;
-      const excelData: any[] = [];
-      const merges: any[] = [];
-      let currentRow = 6; // JSON data will start at row 7 (index 6)
-
       const p = project as any;
       const phases = p.tasks || p.breakdowns || p.phases || p.l1_tasks || [];
 
+      // First Pass: Calculate Total Hours from L2 ONLY to prevent double counting
       phases.forEach((phase: any) => {
         const phaseName = (phase.title || phase.name || '').toUpperCase();
-        const items = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [];
-        const tasksToExport = items.length > 0 ? items : [{}];
-        const taskCount = tasksToExport.length;
-
-        tasksToExport.forEach((task: any) => {
+        const tasks = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [];
+        tasks.forEach((task: any) => {
           const hours = parseFloat(task.man_hours || task.hours) || 0;
-          const mins = hours * 60;
-
           if (phaseName.includes('FSD')) fsdHours += hours;
           else if (phaseName.includes('DEV')) devHours += hours;
           else if (phaseName.includes('SIT')) sitHours += hours;
-
-          // EXACT 13 FIELDS
-          excelData.push({
-            "Project Name": project.project_name || '-',
-            "Phase L1": phase.title || phase.name || '-',
-            "Task": task.title || task.name || '-',
-            "Type Task": task.type_task || task.type || '-',
-            "Components": task.components || '-',
-            "Detail Breakdown": task.detail_breakdown || task.detail || '-',
-            "Man Hours": hours ? `${hours} h` : '-',
-            "Man Hours (In Minutes)": mins ? `${mins} m` : '-',
-            "Start Date": task.start_time || task.start_date || '-',
-            "End Date": task.end_time || task.end_date || '-',
-            "Status": task.status || 'TODO',
-            "Fachrul Feedback": (task as any).fachrul_feedback || '-',
-            "Barra Feedback": (task as any).barra_feedback || '-'
-          });
         });
-
-        // Merges for Phase L1 (Col B) & Project Name (Col A)
-        if (taskCount > 1) {
-          merges.push({ s: { r: currentRow, c: 1 }, e: { r: currentRow + taskCount - 1, c: 1 } }); 
-          merges.push({ s: { r: currentRow, c: 0 }, e: { r: currentRow + taskCount - 1, c: 0 } }); 
-        }
-        currentRow += taskCount;
       });
 
-      // 3. EXACT Top Headers Injection
-      const topHeaders = [
-        [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], // Row 1
-        [], // Row 2
-        [`Project Name:`, project.project_name || '-', ``, `Global Status:`, project.status || 'TODO', ``, `Total Man days FSD:`, formatManDaysLocal(fsdHours)], // Row 3
-        [`Start Date:`, project.start_date || '-', ``, `Total Man Hours:`, `${(project as any).total_man_hours || (project as any).man_hours || 0} Hours`, ``, `Total Man days DEV:`, formatManDaysLocal(devHours)], // Row 4
-        [`End Date:`, project.end_date || '-', ``, `PIC:`, project.pic_name || (project as any).pic || '-', ``, `Total Man days SIT:`, formatManDaysLocal(sitHours)], // Row 5
-        [] // Row 6
+      const trueTotalHours = fsdHours + devHours + sitHours;
+
+      // 3. Build the ENTIRE Sheet as Array of Arrays (AOA)
+      const aoa: any[][] = [
+        [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], // Row 1 (Index 0)
+        [], // Row 2 (Index 1)
+        [`Project Name`, project.project_name || '-', ``, `Global Status`, project.status || 'TODO'], // Row 3 (Index 2)
+        [`Start Date`, formatDate(project.start_date), ``, `Total Man Hours`, `${trueTotalHours} Hours`], // Row 4 (FORMATTED)
+        [`End Date`, formatDate(project.end_date), ``, `PIC`, project.pic_name || (project as any).pic || '-'], // Row 5 (FORMATTED)
+        [], // Row 6 (Index 5)
+        [`Total Man days FSD:`, formatManDays(fsdHours)], // Row 7 (Index 6)
+        [`Total Man days DEV:`, formatManDays(devHours)], // Row 8 (Index 7)
+        [`Total Man days SIT:`, formatManDays(sitHours)], // Row 9 (Index 8)
+        [], // Row 10 (Index 9)
+        [ // Row 11 (Index 10): MAIN TABLE HEADERS (EXACT 13 FIELDS)
+          "Project Name", "Phase L1", "Task", "Type Task", "Components", 
+          "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
+          "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
+        ]
       ];
 
-      // 4. Create Worksheet
-      const ws = XLSX.utils.aoa_to_sheet(topHeaders);
-      merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } }); // Title merge
+      const merges = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } } // Merge the main title across all 13 columns
+      ];
 
-      // 5. Append JSON Data
-      XLSX.utils.sheet_add_json(ws, excelData, { origin: "A7" });
+      let currentRow = 11; // Data starts at Row 12 (0-indexed)
 
-      // 6. Apply Merges and strict Column Widths
+      // 4. Second Pass: Build Data Rows & Merge Coordinates
+      phases.forEach((phase: any) => {
+        const tasks = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [{}];
+        const taskCount = tasks.length;
+        const startRow = currentRow; // Remember where this phase started
+
+        tasks.forEach((task: any) => {
+          const hours = parseFloat(task.man_hours || task.hours) || 0;
+          const mins = hours * 60;
+
+          aoa.push([
+            project.project_name || '-',
+            phase.title || phase.name || '-',
+            task.title || task.name || '-',
+            task.type_task || task.type || '-',
+            task.components || '-',
+            task.detail_breakdown || task.detail || '-',
+            hours ? `${hours} h` : '-',
+            mins ? `${mins} m` : '-',
+            formatDate(task.start_time || task.start_date), // Row Data Start Date (FORMATTED)
+            formatDate(task.end_time || task.end_date),   // Row Data End Date (FORMATTED)
+            task.status || 'TODO',
+            (task as any).fachrul_feedback || '-',
+            (task as any).barra_feedback || '-'
+          ]);
+          currentRow++;
+        });
+
+        // Add Merge Coordinates for L1 and Project Name
+        if (taskCount > 1) {
+          // Note: s = start, e = end, r = row, c = col (0-indexed)
+          merges.push({ s: { r: startRow, c: 1 }, e: { r: startRow + taskCount - 1, c: 1 } }); // Phase L1 (Col B)
+          merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow + taskCount - 1, c: 0 } }); // Project Name (Col A)
+        }
+      });
+
+      // 5. Generate Worksheet from AOA
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      // 6. Apply Merges & Strict Column Widths
       ws['!merges'] = merges;
       ws['!cols'] = [
         { wch: 25 }, // A: Project Name
         { wch: 15 }, // B: Phase L1
-        { wch: 50 }, // C: Task
+        { wch: 45 }, // C: Task
         { wch: 15 }, // D: Type Task
         { wch: 25 }, // E: Components
         { wch: 65 }, // F: Detail Breakdown
         { wch: 12 }, // G: Man Hours
-        { wch: 22 }, // H: Man Hours (In Minutes)
+        { wch: 22 }, // H: Man Hours (Mins)
         { wch: 15 }, // I: Start Date
         { wch: 15 }, // J: End Date
         { wch: 15 }, // K: Status
@@ -5036,21 +5066,71 @@ function PortfolioDashboard({
         { wch: 35 }  // M: Barra Feedback
       ];
 
-      // 7. Force Text Wrap Styling on all populated cells
-      for (const cell in ws) {
-        if (cell[0] === '!') continue; // Skip metadata
-        // @ts-ignore
-        ws[cell].s = { 
-          alignment: { wrapText: true, vertical: "top" },
-          font: { name: "Arial", sz: 10 }
-        };
+      // Define Reuseable Borders
+      const borderDef = {
+        top: { style: "thin" as const, color: { rgb: "D9D9D9" } },
+        bottom: { style: "thin" as const, color: { rgb: "D9D9D9" } },
+        left: { style: "thin" as const, color: { rgb: "D9D9D9" } },
+        right: { style: "thin" as const, color: { rgb: "D9D9D9" } }
+      };
+
+      // 7. Inject Styles
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
+          if (!ws[cellRef]) continue;
+          //@ts-ignore
+          if (R === 0) { // Main Title
+            ws[cellRef].s = {
+              fill: { fgColor: { rgb: "1F4E78" } },
+              font: { name: "Arial", sz: 14, bold: true, color: { rgb: "FFFFFF" } },
+              alignment: { horizontal: "center", vertical: "center" }
+            };
+          } else if ((R >= 2 && R <= 4) || (R >= 6 && R <= 8)) { // Metadata
+            ws[cellRef].s = {
+              font: { name: "Arial", sz: 10, bold: C === 0 || C === 3 || C === 6 },
+              alignment: { vertical: "center" },
+              border: (R === 4 || R === 8) ? { bottom: { style: "thin", color: { rgb: "D9D9D9" } } } : undefined
+            };
+          } else if (R === 10) { // Table Headers
+            ws[cellRef].s = {
+              fill: { fgColor: { rgb: "2F5597" } },
+              font: { name: "Arial", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+              alignment: { horizontal: "center", vertical: "center", wrapText: true },
+              border: borderDef
+            };
+          } else if (R >= 11) { // Data Rows
+            if (C === 1 || C === 0) {
+              ws[cellRef].s = {
+                fill: C === 1 ? { fgColor: { rgb: "F2F2F5" } } : undefined,
+                font: { name: "Arial", sz: 10, bold: C === 1 },
+                alignment: { horizontal: "center", vertical: "center", wrapText: true },
+                border: borderDef
+              };
+            } else if (C === 8 || C === 9 || C === 10) {
+              ws[cellRef].s = {
+                font: { name: "Arial", sz: 10 },
+                alignment: { horizontal: "center", vertical: "top", wrapText: true },
+                border: borderDef
+              };
+            } else {
+              ws[cellRef].s = {
+                font: { name: "Arial", sz: 10 },
+                alignment: { vertical: "top", wrapText: true },
+                border: borderDef
+              };
+            }
+          }
+        }
       }
 
+      // 8. Save
       const sheetName = (project.project_name || 'Project').substring(0, 31).replace(/[\[\]\?\*\\\/]/g, '');
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Project');
     });
 
-    XLSX.writeFile(wb, `Om_Dedy_Timeline_Deep_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `OM_DEDY_Timeline_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -7340,12 +7420,8 @@ function GanttDetailView({
   const handleExportWBS = () => {
     if (!currentProject) return;
     
-    // Get all tasks for this project
-    const projectTasks = tasks.filter(t => t.project_id === currentProject.id);
-    // Sort tasks by start time
-    const sortedTasks = [...projectTasks].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-    
-    exportToExcel(currentProject, sortedTasks);
+    // Pass the hierarchical project tree roots to the new export utility
+    exportToExcel(currentProject, projectTree.roots);
   };
 
   if (!projectTree || !projectTree.roots || (projectTree.roots.length === 0 && !isGlobalView)) {
