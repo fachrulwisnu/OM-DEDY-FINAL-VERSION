@@ -13,6 +13,23 @@ const handleExcelExport = (data: any[], fileName: string, merges?: any[], cols?:
   XLSX.writeFile(wb, `${fileName}.xlsx`);
 };
 
+// REFACTOR: Absolute minute precision to prevent JS floating-point loss
+export const formatDays = (totalHours: number, projectType: string) => {
+  if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
+  
+  const hoursPerDay = (projectType || '').toUpperCase() === 'KECIL' ? 2 : 6;
+  
+  const totalMinutes = Math.round(totalHours * 60);
+  const minutesPerDay = hoursPerDay * 60;
+  
+  const days = Math.floor(totalMinutes / minutesPerDay);
+  const remainingMinutes = totalMinutes % minutesPerDay;
+  const hours = Math.floor(remainingMinutes / 60);
+  const mins = Math.round(remainingMinutes % 60);
+  
+  return `${days} Days, ${hours} Hours, ${mins} Mins`;
+};
+
 import { HOLIDAYS_2026, CUTI_BERSAMA_2026, PHASE_L1_OPTIONS, PHASE_ORDER } from './constants';
 import { 
   Plus, 
@@ -158,20 +175,6 @@ import SwaggerDocs from './components/SwaggerDocs';
 import PmaIntegration from './components/PmaIntegration';
 import { exportToExcel } from './utils/exportExcel';
 import { CustomDatePicker } from './components/ui/CustomDatePicker';
-
-const formatWorkday = (totalHours: number) => {
-  if (!totalHours || totalHours <= 0) return '-';
-  const days = Math.floor(totalHours / 9);
-  const remainingHours = Math.floor(totalHours % 9);
-  const remainingMinutes = Math.round((totalHours % 1) * 60);
-  
-  const parts = [];
-  if (days > 0) parts.push(`${days} Hari Kerja`);
-  if (remainingHours > 0) parts.push(`${remainingHours} Jam`);
-  if (remainingMinutes > 0) parts.push(`${remainingMinutes} Menit`);
-  
-  return parts.length > 0 ? parts.join(' ') : '-';
-};
 
 // Utils moved to ganttDateUtils.ts
 const formatDateForDB = (dateInput: any) => {
@@ -2918,6 +2921,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [projectDiajukan, setProjectDiajukan] = useState('');
+  const [projectType, setProjectType] = useState('INTI'); 
   const [isSyncing, setIsSyncing] = useState(false);
   
   const [phases, setPhases] = useState<any[]>([{ 
@@ -3092,6 +3096,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
         owner_div: divOwner.trim() || undefined,
         div_owner: divOwner.trim(),
         project_diajukan: projectDiajukan.trim(),
+        project_type: projectType,
         start_date: pStart || undefined,
         end_date: pEnd || undefined
       }, actorEmail);
@@ -3295,7 +3300,23 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
               </div>
             </div>
 
-            {/* Row 4: Project Diajukan */}
+            {/* Row 4: Tipe Project selection */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-[var(--accent)] uppercase tracking-widest px-1">Tipe Project</label>
+              <select
+                value={projectType}
+                onChange={(e) => {
+                  setProjectType(e.target.value);
+                  setHasUnsavedChanges(true);
+                }}
+                className="w-full bg-[#111C44] border border-white/10 rounded-xl px-4 py-4 text-sm text-white outline-none focus:ring-[var(--accent)] font-bold cursor-pointer transition-all"
+              >
+                <option value="INTI">Project Inti (1 Day = 6 Jam)</option>
+                <option value="KECIL">Project Kecil (1 Day = 2 Jam)</option>
+              </select>
+            </div>
+
+            {/* Row 5: Project Diajukan */}
             <div className="space-y-2">
               <label className="text-[10px] font-black text-[var(--accent)] uppercase tracking-widest px-1">Project Diajukan (Short Summary)</label>
               <textarea 
@@ -3409,7 +3430,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
                         className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-lg px-2 py-2.5 text-xs text-[var(--accent)] text-center font-black outline-none focus:border-[var(--accent)]"
                       />
                       <span className="text-[8px] font-black text-[var(--text-sub)] uppercase tracking-tight h-3">
-                         {phase.man_hours > 0 ? `≈ ${formatWorkday(phase.man_hours)}` : ''}
+                         {phase.man_hours > 0 ? `≈ ${formatDays(phase.man_hours, projectType)}` : ''}
                       </span>
                     </div>
 
@@ -3454,13 +3475,13 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
                     {stats.isOver && (
                       <p key={`over-${phase.id}`} className="text-[10px] font-black text-rose-500 uppercase tracking-widest flex items-center gap-2 bg-rose-500/10 py-2 px-3 rounded-lg border border-rose-500/20">
                         <AlertTriangle className="w-3 h-3" />
-                        ⚠️ Over-Allocated: Breakdown melebihi durasi Task Utama! (Kekurangan {formatWorkday(Math.abs(stats.remaining))})
+                        ⚠️ Over-Allocated: Breakdown melebihi durasi Task Utama! (Kekurangan {formatDays(Math.abs(stats.remaining), projectType)})
                       </p>
                     )}
                     {stats.isUnder && (
                       <p key={`under-${phase.id}`} className="text-[10px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-2 bg-amber-500/10 py-2 px-3 rounded-lg border border-amber-500/20">
                         <AlertTriangle className="w-3 h-3" />
-                        ⚠️ Under-Allocated: Sisa waktu {formatWorkday(stats.remaining)} belum dialokasikan
+                        ⚠️ Under-Allocated: Sisa waktu {formatDays(stats.remaining, projectType)} belum dialokasikan
                       </p>
                     )}
                     {stats.isPerfect && (
@@ -3657,7 +3678,7 @@ function CreateProjectModal({ onClose, onSuccess, user, users, isMobile, setProj
             <span key="wizard-stat-hours" className="flex items-center gap-2">
                <span className="w-2.5 h-2.5 rounded-full bg-[var(--bg-page)]" />
                <span className="text-[var(--accent)] font-black">Total Man-Hours: {(totalManHours || 0).toFixed(1)} Jam</span>
-               <span className="text-[var(--text-sub)] font-medium ml-1">{totalManHours > 0 ? `≈ ${formatWorkday(totalManHours)}` : ''}</span>
+               <span className="text-[var(--text-sub)] font-medium ml-1">{totalManHours > 0 ? `≈ ${formatDays(totalManHours, projectType)}` : ''}</span>
             </span>
             {isAnyOverAllocated && (
                <span key="wizard-stat-error" className="text-[var(--danger)] font-black animate-pulse">⚠️ Resolusi Over-Alokasi diperlukan</span>
@@ -3713,6 +3734,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
   const [startDate, setStartDate] = useState(project.start_date || '');
   const [endDate, setEndDate] = useState(project.end_date || '');
   const [projectDiajukan, setProjectDiajukan] = useState(project.project_diajukan || '');
+  const [projectType, setProjectType] = useState(project.project_type || 'INTI');
   const [isSyncing, setIsSyncing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deletedTaskIds, setDeletedTaskIds] = useState<string[]>([]);
@@ -3836,6 +3858,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
         owner_name: ownerName.trim(),
         div_owner: divOwner.trim(),
         project_diajukan: projectDiajukan.trim(),
+        project_type: projectType,
         start_date: startDate || undefined,
         end_date: endDate || undefined
       }, actorEmail);
@@ -4031,8 +4054,23 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
               </div>
             </div>
 
+            {/* Row: Tipe Project selection */}
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest px-1">Project Diajukan (Short Summary)</label>
+              <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest px-1">Tipe Project</label>
+              <select
+                value={projectType}
+                onChange={(e) => {
+                  setProjectType(e.target.value);
+                  setHasUnsavedChanges(true);
+                }}
+                className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded-xl px-4 py-4 text-sm text-[var(--text-main)] outline-none focus:border-blue-500 font-bold cursor-pointer transition-all"
+              >
+                <option value="INTI">Project Inti (1 Day = 6 Jam)</option>
+                <option value="KECIL">Project Kecil (1 Day = 2 Jam)</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
               <textarea 
                 rows={4}
                 value={projectDiajukan}
@@ -4150,7 +4188,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
                   {/* Validation Msg */}
                   <div className="px-4">
                     {stats.isOver && <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest bg-rose-500/10 py-2 px-3 rounded-lg border border-rose-500/20 flex items-center gap-2">⚠️ Over-Allocated: Breakdown melebihi L1!</p>}
-                    {stats.isUnder && <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 py-2 px-3 rounded-lg border border-amber-500/20 flex items-center gap-2">⚠️ Under-Allocated: {formatWorkday(stats.remaining)} Sisa</p>}
+                    {stats.isUnder && <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 py-2 px-3 rounded-lg border border-amber-500/20 flex items-center gap-2">⚠️ Under-Allocated: {formatDays(stats.remaining, projectType)} Sisa</p>}
                     {stats.isPerfect && <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-500/5 py-2 px-3 rounded-lg border border-emerald-500/20 flex items-center gap-2">✅ Alokasi Pas</p>}
                   </div>
 
@@ -4294,7 +4332,7 @@ function EditProjectWBSModal({ project, tasks, onClose, onSuccess, user, users, 
               <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
               {phases.length} Phases Active
             </span>
-            <span className="text-blue-400 font-black">Total: {(totalManHours || 0).toFixed(1)} Jam ({formatWorkday(totalManHours)})</span>
+            <span className="text-blue-400 font-black">Total: {(totalManHours || 0).toFixed(1)} Jam ({formatDays(totalManHours, projectType)})</span>
             {isAnyOverAllocated && <span className="text-rose-500 font-black animate-bounce">⚠️ Validation Error: Over-Allocation</span>}
           </p>
           <div className="flex gap-4 pointer-events-auto z-50">
@@ -5364,8 +5402,18 @@ function PortfolioDashboard({
 
                   <div onClick={() => onOpenProject(p.id)}>
                 <div className="flex justify-between items-start mb-6">
-                  <div className="w-12 h-12 bg-[var(--bg-main)] rounded-xl flex items-center justify-center group-hover:bg-[var(--primary)]/10 transition-all">
-                    <FolderKanban className="w-6 h-6 text-[var(--text-sub)] group-hover:text-[var(--primary)] transition-colors" />
+                  <div className="flex flex-col gap-3">
+                    <div className="w-12 h-12 bg-[var(--bg-main)] rounded-xl flex items-center justify-center group-hover:bg-[var(--primary)]/10 transition-all">
+                      <FolderKanban className="w-6 h-6 text-[var(--text-sub)] group-hover:text-[var(--primary)] transition-colors" />
+                    </div>
+                    {/* Display Project Type Badge */}
+                    <span className={`text-[8px] font-black px-2.5 py-1 rounded-md uppercase tracking-[0.2em] w-fit border ${
+                      (p.project_type || 'INTI') === 'KECIL' 
+                        ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' 
+                        : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                    }`}>
+                      {p.project_type || 'INTI'}
+                    </span>
                   </div>
                   <div onClick={(e) => e.stopPropagation()}>
                     <ProjectStatusSelector status={p.status} onUpdate={(v) => onUpdateProject(p.id, { status: v })} disabled={!user} />
@@ -5398,11 +5446,13 @@ function PortfolioDashboard({
                   )}
                   <div className="flex items-center gap-2 text-[9px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
                     <Clock className="w-3 h-3 text-[var(--primary)]" />
-                    <span>MAN HOURS: <span className="text-[var(--text-primary)] transition-colors font-bold">
-                      {tasks
-                        .filter(t => t.project_id === p.id && t.level === 1)
-                        .reduce((sum, t) => sum + (Number(t.man_hours) || 0), 0)
-                        .toFixed(1)}
+                    <span>TOTAL EFFORT: <span className="text-[var(--text-primary)] transition-colors font-bold">
+                      {formatDays(
+                        tasks
+                          .filter(t => t.project_id === p.id && !t.parent_id)
+                          .reduce((sum, t) => sum + (Number(t.man_hours) || 0), 0),
+                        p.project_type || 'INTI'
+                      )}
                     </span></span>
                   </div>
                   <div className="flex items-center gap-2 text-[9px] font-bold text-[var(--text-sub)] uppercase tracking-widest">
@@ -7265,10 +7315,12 @@ function GanttDetailView({
     const totalTasks = pTasks.filter(t => !t.parent_id).length;
     const totalChildTasks = pTasks.filter(t => !!t.parent_id).length;
     
-    // THE "TRUE SUM" PROTOCOL: Direct aggregation of the man_hours column
-    const totalManHours = pTasks.reduce((sum, t) => sum + (Number(t.man_hours) || 0), 0);
+    // THE "TRUE SUM" PROTOCOL: Pull true hours strictly from L1 phases to respect spare time
+    const totalManHours = pTasks
+      .filter(t => !t.parent_id)
+      .reduce((sum, t) => sum + (Number(t.man_hours) || 0), 0);
     const remainingManHours = pTasks
-      .filter(t => t.status !== TaskStatus.DONE)
+      .filter(t => !t.parent_id && t.status !== TaskStatus.DONE)
       .reduce((sum, t) => sum + (Number(t.man_hours) || 0), 0);
 
     return { 
@@ -7352,9 +7404,10 @@ function GanttDetailView({
         const baseStart = projectRange.from_date ? new Date(projectRange.from_date).getTime() : (p.start_date ? new Date(p.start_date).getTime() : new Date(p.created_at).getTime());
         const baseEnd = projectRange.to_date ? new Date(projectRange.to_date).getTime() : (p.end_date ? new Date(p.end_date).getTime() : new Date(p.created_at).getTime() + 86400000);
 
-        // TRUE MATH AGGREGATION for Global View
-        const leafTasks = pTasks.filter(t => !pTasks.some(other => other.parent_id === t.id));
-        const totalProjectManHours = leafTasks.reduce((sum, t) => sum + (Number(t.man_hours) || 0), 0);
+        // TRUE MATH AGGREGATION for Global View: Only sum L1 tasks to respect spare/override time
+        const totalProjectManHours = pTasks
+          .filter(t => !t.parent_id)
+          .reduce((sum, t) => sum + (Number(t.man_hours) || 0), 0);
 
         return {
           id: p.id,
@@ -7490,14 +7543,38 @@ function GanttDetailView({
                   </div>
 
                   {/* GLOBAL STATUS HEADER DISPLAY */}
-                  {!isGlobalView && currentProject?.status && (
-                    <div className="flex items-center gap-3 bg-white dark:bg-slate-950/50 px-4 py-2 rounded-xl border border-indigo-100 dark:border-indigo-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(99,102,241,0.1)] animate-pulse transition-colors">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                      <div className="flex flex-col">
-                        <span className="text-[7px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none mb-0.5">Global Process Status</span>
-                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none italic">
-                          {currentProject.status}
-                        </span>
+                  {!isGlobalView && currentProject && (
+                    <div className="flex items-center gap-4">
+                      {/* Project Type Badge */}
+                      <div className={cn(
+                        "px-3 py-1.5 rounded-xl border font-black text-[9px] uppercase tracking-widest shadow-sm",
+                        (currentProject.project_type || 'INTI') === 'KECIL' 
+                          ? 'bg-amber-500/10 text-amber-500 border-amber-500/20 shadow-amber-500/5' 
+                          : 'bg-blue-500/10 text-blue-500 border-blue-500/20 shadow-blue-500/5'
+                      )}>
+                        TYPE: {currentProject.project_type || 'INTI'}
+                      </div>
+
+                      {/* Status Metric */}
+                      <div className="flex items-center gap-3 bg-white dark:bg-slate-950/50 px-4 py-2 rounded-xl border border-indigo-100 dark:border-indigo-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(99,102,241,0.1)] animate-pulse transition-colors">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                        <div className="flex flex-col">
+                          <span className="text-[7px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none mb-0.5">Global Process Status</span>
+                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none italic">
+                            {currentProject.status}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Total Days Metric */}
+                      <div className="flex items-center gap-3 bg-white dark:bg-slate-950/50 px-4 py-2 rounded-xl border border-indigo-100 dark:border-indigo-500/30 shadow-sm">
+                        <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                        <div className="flex flex-col">
+                          <span className="text-[7px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none mb-0.5">Total Effort (Days)</span>
+                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none italic">
+                            {formatDays(projectStats.totalManHours, currentProject.project_type || 'INTI')}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -7656,6 +7733,7 @@ function GanttDetailView({
                             onDeleteTask={handleDeleteTask}
                             expandedRows={expandedRows}
                             revertCount={revertCount}
+                            projectType={currentProject?.project_type || 'INTI'}
                           />
                         ))}
                       </div>
@@ -7680,6 +7758,7 @@ function GanttDetailView({
                           disabled={false}
                           isMobile={isMobile}
                           setTasks={setTasks}
+                          projectType={currentProject?.project_type || 'INTI'}
                         />
                       </div>
                     </div>
@@ -8761,7 +8840,7 @@ function AuditLogTable({ logs }: { logs: ProjectRescheduleLog[] }) {
   );
 }
 
-function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onToggleExpand, onUpdateTask, onOpenAudit, onAddSubTask, onDeleteTask, disabled, isMobile, revertCount, setTasks }: any) {
+function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onToggleExpand, onUpdateTask, onOpenAudit, onAddSubTask, onDeleteTask, disabled, isMobile, revertCount, setTasks, projectType = 'INTI' }: any) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -9027,7 +9106,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
                   <span className="text-[8px] text-[var(--text-sub)] font-bold">h</span>
                 </div>
                 <div className="text-[7px] text-[var(--text-sub)] font-black uppercase tracking-tighter bg-[var(--bg-page)] px-1.5 py-0.5 rounded border border-[var(--border)]">
-                  {formatWorkday(task.man_hours || 0)}
+                  {formatDays(task.man_hours || 0, projectType)}
                 </div>
              </div>
           </td>
@@ -9258,7 +9337,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
           <thead className="sticky top-0 z-40 bg-[var(--bg-page)] border-b border-[var(--border)]">
             <tr className="shadow-sm">
               <th className="px-6 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-[0.2em] min-w-[300px]">Hierarchy & Governance</th>
-              <th className="px-2 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest text-center w-24">Man-Hours</th>
+              <th className="px-2 py-4 text-[9px] font-black text-[var(--accent)] uppercase tracking-widest text-center w-24">Total Days</th>
               <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-40 text-center">PIC</th>
               <th className="px-4 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-32 text-center bg-blue-500/5">Realized Finish</th>
               <th className="px-2 py-4 text-[9px] font-black text-[var(--text-main)] uppercase tracking-widest w-24 text-center">Dev</th>
@@ -9303,7 +9382,7 @@ function GanttTree({ user, users, roots, map, tasks, projects, expandedRows, onT
   );
 }
 
-function MobileTaskCard({ task, onToggleExpand, isExpanded, onUpdateTask, onDeleteTask, expandedRows, revertCount, level = 0, gridStart, totalDuration }: any) {
+function MobileTaskCard({ task, onToggleExpand, isExpanded, onUpdateTask, onDeleteTask, expandedRows, revertCount, level = 0, gridStart, totalDuration, projectType = 'INTI' }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const hasChildren = task.children && task.children.length > 0;
   
@@ -9355,7 +9434,7 @@ function MobileTaskCard({ task, onToggleExpand, isExpanded, onUpdateTask, onDele
             {task.title || 'Untitled Task'}
           </h3>
           <div className="shrink-0 text-right">
-             <span className="text-[10px] font-black text-indigo-400 block tracking-widest">{formatWorkday(task.man_hours || 0)}</span>
+             <span className="text-[10px] font-black text-indigo-400 block tracking-widest">{formatDays(task.man_hours || 0, projectType)}</span>
              <span className="text-[8px] font-black text-slate-600 block uppercase">Allocated</span>
           </div>
         </div>
@@ -9429,6 +9508,7 @@ function MobileTaskCard({ task, onToggleExpand, isExpanded, onUpdateTask, onDele
             task={task}
             onClose={() => setIsEditing(false)}
             onUpdate={onUpdateTask}
+            projectType={projectType}
           />
         )}
         {isExpanded && hasChildren && (
@@ -9452,6 +9532,7 @@ function MobileTaskCard({ task, onToggleExpand, isExpanded, onUpdateTask, onDele
                   level={level + 1}
                   gridStart={gridStart}
                   totalDuration={totalDuration}
+                  projectType={projectType}
                 />
               ))}
             </div>
@@ -9462,7 +9543,7 @@ function MobileTaskCard({ task, onToggleExpand, isExpanded, onUpdateTask, onDele
   );
 }
 
-function MobileTaskEditModal({ task, onClose, onUpdate }: { task: Task, onClose: () => void, onUpdate: (id: string, field: string, value: any) => void }) {
+function MobileTaskEditModal({ task, onClose, onUpdate, projectType = 'INTI' }: { task: Task, onClose: () => void, onUpdate: (id: string, field: string, value: any) => void, projectType?: string }) {
   const [formData, setFormData] = useState({
     title: task.title || '',
     assignee: task.assignee || '',
@@ -9643,7 +9724,7 @@ function MobileTaskEditModal({ task, onClose, onUpdate }: { task: Task, onClose:
                </div>
             </div>
             <p className="text-[9px] text-slate-600 uppercase font-bold tracking-widest text-center mt-2">
-              Equivalent to ≈ {formatWorkday(formData.man_hours)}
+              Equivalent to ≈ {formatDays(formData.man_hours, projectType)}
             </p>
           </div>
           

@@ -37,6 +37,7 @@ export interface Project {
   start_date?: string;
   end_date?: string;
   project_diajukan?: string;
+  project_type?: string;
   created_by?: string;
   created_at: string;
   updated_at: string;

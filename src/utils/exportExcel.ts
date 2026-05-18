@@ -1,9 +1,10 @@
-import * as XLSX from 'xlsx-js-style';
+import * as XLSX from 'xlsx-js-style'; 
 
 /**
  * Enhanced export utility for Om Dedy Dashboard
  * Generates an EXACT layout using AOA and xlsx-js-style
- * Includes Safe Sorting Layer and Subtotal Mandays per Phase
+ * UPDATED: Calculate True Totals strictly from L1 PHASE inputs to respect SPARE time overrides
+ * UPDATED: Minute-based precision for Days calculation
  */
 export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
   if (!project || !hierarchicalPhases) {
@@ -11,7 +12,32 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
     return;
   }
 
-  // 1. Safe Sort Helper to handle Drag-and-Drop Order
+  const pType = (project.project_type || 'INTI').toUpperCase();
+
+  const formatDays = (totalHours: number, type: string) => {
+    if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
+    const hoursPerDay = (type || '').toUpperCase() === 'KECIL' ? 2 : 6;
+    const totalMinutes = Math.round(totalHours * 60);
+    const minutesPerDay = hoursPerDay * 60;
+    
+    const days = Math.floor(totalMinutes / minutesPerDay);
+    const remainingMinutes = totalMinutes % minutesPerDay;
+    const hours = Math.floor(remainingMinutes / 60);
+    const mins = Math.round(remainingMinutes % 60);
+    
+    return `${days} Days, ${hours} Hours, ${mins} Mins`;
+  };
+
+  const formatDate = (dateStr: any) => { 
+    if (!dateStr || dateStr === '-') return '-';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr; 
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+    } catch (e) { return dateStr; }
+  };
+
   const safeSortData = (arr: any[]) => {
     if (!arr || !Array.isArray(arr)) return [];
     return [...arr].sort((a, b) => {
@@ -27,81 +53,48 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
     });
   };
 
-  // 2. Clean Date Formatter Utility
-  const formatDate = (dateStr: any) => {
-    if (!dateStr || dateStr === '-') return '-';
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr; 
-      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
-    } catch (e) {
-      return dateStr;
-    }
-  };
-
-  // 3. Man Days Formatter (9 Hours = 1 Day Rule)
-  const formatManDays = (totalHours: number) => {
-    if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
-    const days = Math.floor(totalHours / 9); 
-    const hours = Math.floor(totalHours % 9);
-    const mins = Math.round((totalHours % 1) * 60);
-    return `${days} Days, ${hours} Hours, ${mins} Mins`;
-  };
-
   let fsdHours = 0, devHours = 0, sitHours = 0;
-  // APPLY SORTING TO PHASES
   const sortedPhases = safeSortData(hierarchicalPhases);
 
-  // First Pass: Calculate Global Hours from Sorted L2 Tasks Only
+  // CRITICAL FIX: Calculate True Totals strictly from L1 PHASE inputs to respect SPARE time overrides
   sortedPhases.forEach((phase) => {
     const phaseName = (phase.title || phase.name || '').toUpperCase();
-    const tasks = safeSortData(phase.children || phase.tasks || []);
+    const phaseHours = parseFloat(phase.man_hours) || 0; // Take hours from L1, NOT from summing L2
     
-    tasks.forEach((task: any) => {
-      const hours = parseFloat(task.man_hours || task.hours) || 0;
-      if (phaseName.includes('FSD')) fsdHours += hours;
-      else if (phaseName.includes('DEV')) devHours += hours;
-      else if (phaseName.includes('SIT')) sitHours += hours;
-    });
+    if (phaseName.includes('FSD')) fsdHours += phaseHours;
+    else if (phaseName.includes('DEV')) devHours += phaseHours;
+    else if (phaseName.includes('SIT')) sitHours += phaseHours;
   });
 
   const trueTotalHours = fsdHours + devHours + sitHours;
 
-  // 4. Build Sheet Matrix (AOA) with Formatted Dates
   const aoa: any[][] = [
-    [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], 
-    [], 
+    [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], [], 
     [`Project Name`, project.project_name || project.name || '-', ``, `Global Status`, project.status || 'TODO'], 
     [`Start Date`, formatDate(project.start_date), ``, `Total Man Hours`, `${trueTotalHours} Hours`], 
     [`End Date`, formatDate(project.end_date), ``, `PIC`, project.pic_name || project.pic || '-'], 
+    [`Project Type`, pType, ``, ``, ``], [], 
+    [`Total Days FSD:`, formatDays(fsdHours, pType)], 
+    [`Total Days DEV:`, formatDays(devHours, pType)], 
+    [`Total Days SIT:`, formatDays(sitHours, pType)], 
     [], 
-    [`Total Man days FSD:`, formatManDays(fsdHours)], 
-    [`Total Man days DEV:`, formatManDays(devHours)], 
-    [`Total Man days SIT:`, formatManDays(sitHours)], 
-    [], 
-    [ 
-      "Project Name", "Phase L1", "Task", "Type Task", "Components", 
-      "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
-      "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
-    ]
+    [ "Project Name", "Phase L1", "Task", "Type Task", "Components", "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback" ]
   ];
 
   const merges: any[] = [ { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } } ];
   let currentRow = 11; 
 
-  // Second Pass: Populate rows from sorted lists
   sortedPhases.forEach((phase) => {
     const rawTasks = phase.children && phase.children.length > 0 ? phase.children : [{}];
-    // APPLY SORTING TO TASKS INSIDE PHASE
-    const sortedTasks = safeSortData(rawTasks);
+    const sortedTasks = safeSortData(rawTasks); 
     const startRow = currentRow; 
-    let phaseTotalHours = 0;
+    
+    // Use L1's actual hours for the subtotal
+    const phaseTotalHours = parseFloat(phase.man_hours) || 0; 
 
     sortedTasks.forEach((task: any) => {
       const hours = parseFloat(task.man_hours || task.hours) || 0;
       const mins = hours * 60;
-      phaseTotalHours += hours;
 
       aoa.push([
         project.project_name || project.name || '-',
@@ -121,15 +114,15 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
       currentRow++;
     });
 
-    // === INJECT SUBTOTAL ROW AT THE END OF L1 ===
+    // INJECT L1 PHASE SUBTOTAL ROW (Renamed Label to DAYS)
     const safePhaseName = (phase.title || phase.name || 'PHASE').toUpperCase();
     aoa.push([
       project.project_name || project.name || '-', 
       phase.title || phase.name || '-', 
-      `TOTAL ${safePhaseName} MANDAYS :`, // In Task Column (Index 2)
+      `TOTAL ${safePhaseName} DAYS :`, // In Task Column (Index 2)
       "", "", "", // Empty Type, Components, Detail
-      formatManDays(phaseTotalHours), // In Man Hours Column (Index 6)
-      `${phaseTotalHours * 60} Mins`, // In Minutes Column (Index 7)
+      formatDays(phaseTotalHours, pType), // Uses exact L1 input
+      `${Math.round(phaseTotalHours * 60)} Mins`, 
       "", "", "", "", ""
     ]);
     
@@ -169,8 +162,7 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
       if (!ws[cellRef]) continue;
       const cellValue = ws[cellRef].v;
 
-      // Is this our new Subtotal Row? (Check if value starts with TOTAL and ends with MANDAYS :)
-      const isSubtotal = typeof cellValue === 'string' && cellValue.startsWith('TOTAL ') && cellValue.includes('MANDAYS');
+      const isSubtotal = typeof cellValue === 'string' && cellValue.startsWith('TOTAL ') && cellValue.includes(' DAYS :');
 
       if (R === 0) { // Main Title
         ws[cellRef].s = {
@@ -226,5 +218,16 @@ export const exportToExcel = (project: any, hierarchicalPhases: any[]) => {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
-  XLSX.writeFile(wb, `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}.xlsx`);
+  
+  // Custom Buffer write for Vite safety
+  const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}.xlsx`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
 };
