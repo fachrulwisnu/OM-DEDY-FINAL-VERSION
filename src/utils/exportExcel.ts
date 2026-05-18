@@ -11,7 +11,22 @@ export const exportToExcel = async (
   hierarchicalPhases: any[],
   setIsExcelLoading: (loading: boolean) => void
 ) => {
-  if (!project || !hierarchicalPhases) return;
+  if (!project) return;
+
+  // 1. DYNAMICALLY EXTRACT UNIQUE PHASES FROM TASKS (FALLBACK TO HIERARCHICAL PHASES)
+  // We prefer hierarchicalPhases if provided, or extract from project tasks if they exist
+  let phases: string[] = [];
+  let tasksToUse: any[] = [];
+
+  if (hierarchicalPhases && hierarchicalPhases.length > 0) {
+    phases = hierarchicalPhases.map(p => (p.title || p.name || ''));
+    hierarchicalPhases.forEach(p => {
+      if (p.children) tasksToUse.push(...p.children);
+    });
+  } else if (project.tasks) {
+    tasksToUse = project.tasks;
+    phases = [...new Set(tasksToUse.map(t => t.phase).filter(p => p && p.trim() !== ""))];
+  }
 
   const formatDate = (dateStr: any) => { 
     if (!dateStr || dateStr === '-') return '-';
@@ -23,59 +38,101 @@ export const exportToExcel = async (
     } catch (e) { return dateStr; }
   };
 
-  // 1. Initialize Matrix with Table Headers
+  // 2. PRE-CALCULATE DYNAMIC TOTALS FOR RINGKASAN AT THE TOP
+  const phaseTotalsMap: Record<string, any> = {};
+  phases.forEach(phase => {
+    const phaseTasks = tasksToUse.filter(t => (t.phase === phase || (hierarchicalPhases.find(hp => (hp.title || hp.name) === phase)?.children?.includes(t))));
+    let totalMinutes = phaseTasks.reduce((sum, t) => sum + (parseFloat(taskManHours(t)) * 60 || 0), 0);
+    
+    // Fallback search if phase empty
+    if (totalMinutes === 0 && hierarchicalPhases) {
+      const pNode = hierarchicalPhases.find(p => (p.title || p.name) === phase);
+      if (pNode && pNode.children) {
+        totalMinutes = pNode.children.reduce((sum: number, t: any) => sum + (parseFloat(taskManHours(t)) * 60 || 0), 0);
+      }
+    }
+
+    let hoursFromMinutes = Math.floor(totalMinutes / 60);
+    let remainingMinutes = Math.round(totalMinutes % 60);
+    let days = Math.floor(hoursFromMinutes / 8);
+    let remainingHours = hoursFromMinutes % 8;
+    
+    phaseTotalsMap[phase] = {
+      str: `${days} Days, ${remainingHours} Hours, ${remainingMinutes} Mins`,
+      minsStr: `${totalMinutes} Mins`,
+      totalMinutes: totalMinutes
+    };
+  });
+
+  function taskManHours(t: any) {
+    return t.man_hours || t.hours || t.manHours || "0";
+  }
+
+  // 3. INITIALIZE TABLE MATRIX WITH STATIC AND DYNAMIC META INFO
   const data: any[][] = [
-    ["OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["OM DEDY - OPERATIONAL MONITORING DASHBOARD REPORT", "", "", "", "", "", "", "", "", "", "", "", ""],
     ["", "", "", "", "", "", "", "", "", "", "", "", ""],
     ["Project Name", project.project_name || project.name || "-", "", "Global Status", project.status || "TODO", "", "", "", "", "", "", "", ""],
-    ["Start Date", formatDate(project.start_date) || "-", "", "Total Man Hours", `${project.total_man_hours || project.man_hours || 0} Hours`, "", "", "", "", "", "", "", ""],
-    ["End Date", formatDate(project.end_date) || "-", "", "PIC", project.pic_name || project.pic || "-", "", "", "", "", "", "", "", ""],
-    ["Project Type", project.project_type || "INTI", "", "", "", "", "", "", "", "", "", "", ""],
-    ["", "", "", "", "", "", "", "", "", "", "", "", ""],
-    [`Total Days FSD:`, project.total_days_fsd || "0 Days", "", "", "", "", "", "", "", "", "", "", ""],
-    [`Total Days DEV:`, project.total_days_dev || "0 Days", "", "", "", "", "", "", "", "", "", "", ""],
-    [`Total Days SIT:`, project.total_days_sit || "0 Days", "", "", "", "", "", "", "", "", "", "", ""],
-    ["", "", "", "", "", "", "", "", "", "", "", "", ""],
-    [
-      "Project Name", "Phase L1", "Task", "Type Task", "Components", 
-      "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
-      "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
-    ]
+    ["Start Date", formatDate(project.start_date || project.startDate) || "-", "", "Total Man Hours", project.total_man_hours || project.man_hours || project.totalManHours ? `${project.total_man_hours || project.man_hours || project.totalManHours} Hours` : "0 Hours", "", "", "", "", "", "", "", ""],
+    ["End Date", formatDate(project.end_date || project.endDate) || "-", "", "PIC", project.pic_name || project.pic || "-", "", "", "", "", "", "", "", ""],
+    ["Project Type", project.project_type || project.projectType || "INTI", "", "", "", "", "", "", "", "", "", "", ""],
+    ["", "", "", "", "", "", "", "", "", "", "", "", ""]
   ];
 
+  // Append Dynamic Ringkasan Rows
+  phases.forEach(phase => {
+    data.push([`Total Days ${phase}:`, phaseTotalsMap[phase].str, "", "", "", "", "", "", "", "", "", "", ""]);
+  });
+
+  data.push(["", "", "", "", "", "", "", "", "", "", "", "", ""]); // Extra separator spacer row
+
+  // Track exact index location of Table Header Row
+  const headerRowIndex = data.length;
+  data.push([
+    "Project Name", "Phase L1", "Task", "Type Task", "Components", 
+    "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
+    "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
+  ]);
+
+  // Define base structural merges
   const merges: any[] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } },
-    { s: { r: 2, c: 1 }, e: { r: 2, c: 2 } },
-    { s: { r: 3, c: 1 }, e: { r: 3, c: 2 } },
-    { s: { r: 4, c: 1 }, e: { r: 4, c: 2 } }
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, // Title Header block
+    { s: { r: 2, c: 1 }, e: { r: 2, c: 2 } }, // Project Name block
+    { s: { r: 3, c: 1 }, e: { r: 3, c: 2 } }, // Total Man Hours value
+    { s: { r: 4, c: 1 }, e: { r: 4, c: 2 } }  // PIC block
   ];
 
-  // Group tasks by Phase to calculate perfect spans using hierarchicalPhases
-  const targetPhases = ["FSD", "DEV", "SIT"];
-  
-  targetPhases.forEach((phaseName) => {
-    const phaseNode = hierarchicalPhases.find(p => (p.title || p.name || '').toUpperCase().includes(phaseName));
-    if (!phaseNode) return;
+  // Metadata merges for ringkasan rows
+  phases.forEach((_, idx) => {
+    const r = 7 + idx;
+    merges.push({ s: { r, c: 1 }, e: { r, c: 2 } });
+  });
 
-    const phaseTasks = phaseNode.children || [];
+  // 4. POPULATE DYNAMIC ROWS AND CALCULATE LOGICAL CELL SPANS
+  phases.forEach((phase) => {
+    let phaseTasks: any[] = [];
+    if (hierarchicalPhases && hierarchicalPhases.length > 0) {
+      const pNode = hierarchicalPhases.find(p => (p.title || p.name) === phase);
+      phaseTasks = pNode?.children || [];
+    } else {
+      phaseTasks = tasksToUse.filter(t => t.phase === phase);
+    }
+    
     if (phaseTasks.length === 0) return;
 
-    const startRowIndex = data.length; // Start of this phase block
+    const startRowIndex = data.length;
 
-    // Populate task rows for this phase
-    phaseTasks.forEach((task: any) => {
-      const hours = parseFloat(task.man_hours || task.hours) || 0;
-      const mins = hours * 60;
-
+    phaseTasks.forEach((task) => {
+      const h = parseFloat(taskManHours(task)) || 0;
       data.push([
         project.project_name || project.name || "-",
-        phaseName,
+        phase,
         task.title || task.name || "-",
         task.task_type || task.type || "-",
         (Array.isArray(task.components) ? task.components.join(', ') : task.components) || "-",
         task.detail_task || task.detail || "-",
-        hours ? `${hours} h` : "-",
-        mins ? `${mins} m` : "-",
+        h ? `${h} h` : "-",
+        h ? `${h * 60} m` : "-",
         formatDate(task.start_time || task.start_date) || "-",
         formatDate(task.end_time || task.end_date) || "-",
         task.status || "TODO",
@@ -84,104 +141,131 @@ export const exportToExcel = async (
       ]);
     });
 
-    const endRowIndex = data.length - 1; // End of task rows for this phase
+    const endRowIndex = data.length - 1;
 
-    // Apply Vertical Merges for Project Name (Col A) and Phase L1 (Col B) strictly across task rows
+    // Trigger vertical merge spans for Project Name and Phase columns safely
     if (endRowIndex >= startRowIndex) {
-      merges.push({ s: { r: startRowIndex, c: 0 }, e: { r: endRowIndex, c: 0 } }); // Vertically merge Project Name
-      merges.push({ s: { r: startRowIndex, c: 1 }, e: { r: endRowIndex, c: 1 } }); // Vertically merge Phase Name
+      merges.push({ s: { r: startRowIndex, c: 0 }, e: { r: endRowIndex, c: 0 } });
+      merges.push({ s: { r: startRowIndex, c: 1 }, e: { r: endRowIndex, c: 1 } });
     }
 
-    // Calculate Phase Totals (Mirroring requested logic)
-    // We use the sum of children minutes
-    let totalMinutes = phaseTasks.reduce((sum: number, t: any) => {
-        const h = parseFloat(t.man_hours || t.hours) || 0;
-        return sum + (h * 60);
-    }, 0);
-    
-    let hoursFromMinutes = Math.floor(totalMinutes / 60);
-    let remainingMinutes = Math.round(totalMinutes % 60);
-    let days = Math.floor(hoursFromMinutes / 8);
-    let remainingHours = hoursFromMinutes % 8;
-    let formattedDaysStr = `${days} Days, ${remainingHours} Hours, ${remainingMinutes} Mins`;
-
-    // Append the Total Row with proper padding to keep Col A and Col B safe
+    // Append Phase Total Row
     const totalRowIndex = data.length;
     data.push([
       project.project_name || project.name || "-",
-      phaseName,
-      `TOTAL ${phaseName} DAYS :`,
-      "", "", "", // Padding for Columns D, E, F
-      formattedDaysStr,
-      `${totalMinutes} Mins`,
+      phase,
+      `TOTAL ${phase} DAYS :`,
+      "", "", "", 
+      phaseTotalsMap[phase].str,
+      phaseTotalsMap[phase].minsStr,
       "", "", "", "", ""
     ]);
 
-    // Horizontally merge the Total Label across Columns C to F (indices 2 to 5)
+    // Merge horizontal layout specifically for total strings from Col C to Col F
     merges.push({ s: { r: totalRowIndex, c: 2 }, e: { r: totalRowIndex, c: 5 } });
   });
 
-  // 2. Compile Sheet and Inject Layout Styles
+  // 5. TRANSLATE MATRIX TO COMPILATION WORKSHEET WITH AGGRESSIVE STYLE ENGINE
   const ws = XLSX.utils.aoa_to_sheet(data);
   ws['!merges'] = merges;
 
-  // Explicit Column Widths to match original clean layout
+  // Establish Wide Layout Sizing Matrices
   ws['!cols'] = [
-    { wch: 25 }, // A: Project Name
-    { wch: 12 }, // B: Phase L1
-    { wch: 38 }, // C: Task
-    { wch: 16 }, // D: Type Task
-    { wch: 15 }, // E: Components
-    { wch: 55 }, // F: Detail Breakdown
-    { wch: 25 }, // G: Man Hours
-    { wch: 22 }, // H: Man Hours (In Minutes)
-    { wch: 15 }, // I: Start Date
-    { wch: 15 }, // J: End Date
-    { wch: 12 }, // K: Status
-    { wch: 18 }, // L: Fachrul Feedback
-    { wch: 18 }  // M: Barra Feedback
+    { wch: 25 }, { wch: 12 }, { wch: 38 }, { wch: 16 }, { wch: 15 }, 
+    { wch: 55 }, { wch: 25 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, 
+    { wch: 12 }, { wch: 18 }, { wch: 18 }
   ];
 
-  // Inject Row Heights & Design Styles dynamically
   ws['!rows'] = [];
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  
+
+  // Deep loop to inject colors, layout alignment and wrap-text rules
   for (let R = range.s.r; R <= range.e.r; ++R) {
-    ws['!rows'][R] = { hpt: R >= 12 ? 22 : 20 }; // Standard row sizing
+    if (R === 0) ws['!rows'][R] = { hpt: 35 };
+    else if (R === headerRowIndex) ws['!rows'][R] = { hpt: 26 };
+    else if (R > headerRowIndex) {
+      const isTotalRow = String(data[R][2] || '').includes("TOTAL");
+      ws['!rows'][R] = { hpt: isTotalRow ? 30 : 24 };
+    } else {
+      ws['!rows'][R] = { hpt: 20 };
+    }
 
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
       if (!ws[cellRef]) continue;
 
-      // Apply basic standard alignment and font to all generated cells
-      ws[cellRef].s = {
-        font: { name: "Arial", sz: 10 },
-        alignment: { vertical: "center", horizontal: (C === 0 || C === 1 || C >= 6) ? "center" : "left" }
-      };
-
-      // Style total rows specifically
-      const cellValue = String(data[R][2] || '');
-      if (cellValue.includes("TOTAL")) {
-        ws['!rows'][R] = { hpt: 30 }; // Give totals breathing room
+      if (R === 0) {
         ws[cellRef].s = {
-          font: { bold: true, name: "Arial", sz: 10 },
-          fill: { fgColor: { rgb: "F5F5F5" } },
+          font: { bold: true, name: "Arial", sz: 14, color: { rgb: "FFFFFF" } },
+          fill: { fgColor: { rgb: "1F4E78" } },
+          alignment: { vertical: "center", horizontal: "left" }
+        };
+        continue;
+      }
+
+      if (R === headerRowIndex) {
+        ws[cellRef].s = {
+          font: { bold: true, name: "Arial", sz: 10, color: { rgb: "FFFFFF" } },
+          fill: { fgColor: { rgb: "2F5597" } },
+          alignment: { vertical: "center", horizontal: "center", wrapText: true },
+          border: {
+            top: { style: "thin", color: { rgb: "000000" } },
+            bottom: { style: "medium", color: { rgb: "000000" } },
+            left: { style: "thin", color: { rgb: "000000" } },
+            right: { style: "thin", color: { rgb: "000000" } }
+          }
+        };
+        continue;
+      }
+
+      if (R < headerRowIndex) {
+        const isLabelCell = (C === 0 || C === 3);
+        ws[cellRef].s = {
+          font: { bold: isLabelCell, name: "Arial", sz: 10 },
+          alignment: { vertical: "center", horizontal: "left" }
+        };
+        continue;
+      }
+
+      const currentCellCValue = String(data[R][2] || '');
+      if (currentCellCValue.includes("TOTAL")) {
+        ws[cellRef].s = {
+          font: { bold: true, name: "Arial", sz: 10, color: { rgb: "000000" } },
+          fill: { fgColor: { rgb: "F2F2F2" } },
           alignment: { vertical: "center", horizontal: C === 2 ? "left" : "center" },
           border: {
+            top: { style: "thin", color: { rgb: "CCCCCC" } },
+            bottom: { style: "double", color: { rgb: "000000" } },
+            left: { style: "thin", color: { rgb: "E0E0E0" } },
+            right: { style: "thin", color: { rgb: "E0E0E0" } }
+          }
+        };
+      } else {
+        const shouldWrap = (C === 2 || C === 5);
+        ws[cellRef].s = {
+          font: { name: "Arial", sz: 10 },
+          alignment: { 
+            vertical: "center", 
+            horizontal: (C === 0 || C === 1 || C >= 6) ? "center" : "left",
+            wrapText: shouldWrap
+          },
+          border: {
             top: { style: "thin", color: { rgb: "E0E0E0" } },
-            bottom: { style: "double", color: { rgb: "000000" } }
+            bottom: { style: "thin", color: { rgb: "E0E0E0" } },
+            left: { style: "thin", color: { rgb: "E0E0E0" } },
+            right: { style: "thin", color: { rgb: "E0E0E0" } }
           }
         };
       }
     }
   }
 
-  // 3. Convert Workbook to Base64 and pass to Microsoft 365 gateway backend
+  // 6. BUILD FINAL WORKBOOK & POST TO SERVER
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
   
   const excelBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-  const filename = `OM_DEDY_Timeline_${project.name || 'Project'}_${Date.now()}.xlsx`;
+  const filename = `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}_${Date.now()}.xlsx`;
   const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   try {
@@ -205,3 +289,4 @@ export const exportToExcel = async (
     setIsExcelLoading(false);
   }
 };
+
