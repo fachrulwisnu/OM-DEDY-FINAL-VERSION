@@ -265,7 +265,8 @@ export const exportToExcel = async (
   XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
   
   const excelBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-  const filename = `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}_${Date.now()}.xlsx`;
+  const cleanProjectName = (project.project_name || project.name || 'Project').replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `OM_DEDY_Timeline_${cleanProjectName}.xlsx`;
   const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   try {
