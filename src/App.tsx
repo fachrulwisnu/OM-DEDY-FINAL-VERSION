@@ -7103,6 +7103,7 @@ function GanttDetailView({
 
   const [activeView, setActiveView] = useState<'INFRASTRUCTURE' | 'SYSTEM_LOG' | 'HISTORY_EDIT'>('INFRASTRUCTURE');
   const [isExcelLoading, setIsExcelLoading] = useState(false);
+  const [excelUrl, setExcelUrl] = useState<string | null>(null);
   const [rescheduleLogs, setRescheduleLogs] = useState<ProjectRescheduleLog[]>([]);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   
@@ -7475,7 +7476,12 @@ function GanttDetailView({
     if (!currentProject) return;
     
     // Pass the hierarchical project tree roots to the new export utility
-    await exportToExcel(currentProject, projectTree.roots, setIsExcelLoading);
+    const url = await exportToExcel(currentProject, projectTree.roots, setIsExcelLoading);
+    if (url) {
+      setExcelUrl(url);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      toast.success("Excel Berhasil Dieksport!");
+    }
   };
 
   if (!projectTree || !projectTree.roots || (projectTree.roots.length === 0 && !isGlobalView)) {
@@ -7668,9 +7674,19 @@ function GanttDetailView({
                                </button>
                              )}
                              {user && (
-                               <button onClick={exportToExcelAction} disabled={isExcelLoading} className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50">
+                               <button 
+                                 onClick={() => {
+                                   if (excelUrl) {
+                                     window.open(excelUrl, '_blank', 'noopener,noreferrer');
+                                   } else {
+                                     exportToExcelAction();
+                                   }
+                                 }} 
+                                 disabled={isExcelLoading} 
+                                 className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50"
+                               >
                                  {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
-                                 <span>{isExcelLoading ? "Menghubungkan ke M365..." : "Buka & Edit di Excel Online"}</span>
+                                 <span>{isExcelLoading ? "Memproteksi Komentar & Mengeksport..." : "Buka & Edit di Excel Online"}</span>
                                </button>
                              )}
                            </div>
