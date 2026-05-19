@@ -7108,6 +7108,41 @@ function GanttDetailView({
   
   const currentProject = useMemo(() => (projects || []).find((p: any) => p.id === projectId), [projects, projectId]);
 
+  // SMART AUTO-SYNC: Sync feedback on window focus
+  useEffect(() => {
+    const performSilentSync = async () => {
+      if (!currentProject || !currentProject.project_name) return;
+      
+      try {
+        const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+        const response = await fetch(`${backendUrl}/api/m365/sync-feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectName: currentProject.project_name })
+        });
+
+        const result = await response.json();
+        if (result.success && result.data && result.data.length > 0) {
+          // If new data is found, automatically refresh the table data silently
+          setRefreshKey((prev: number) => prev + 1);
+          console.log("Background M365 sync successful, UI updated.");
+        }
+      } catch (error) {
+        console.error("Silent M365 sync failed:", error);
+      }
+    };
+
+    const onFocus = () => {
+      console.log("User returned to tab. Triggering silent M365 sync...");
+      performSilentSync();
+    };
+
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [currentProject?.id, currentProject?.project_name, setRefreshKey]);
+
   // DERIVE PROJECT SPECIFIC AUDIT LOGS
   const systemLogs = useMemo(() => {
     if (!auditLogs) return [];
