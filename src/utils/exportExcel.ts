@@ -156,9 +156,10 @@ export const exportToExcel = async (
           ]);
         });
       } else {
-        // Placeholder for empty phase
+        // CRITICAL: Push a placeholder row if the phase has no tasks (e.g. DEV)
         data.push([
-          projectName, phase, "Belum ada task", "-", "-", "-", "-", "-", "-", "-", "TODO", "-", "-"
+          projectName, phase, "Belum ada task", "-", "-", "-", 
+          "0 h", "0 m", "-", "-", "TODO", "-", "-"
         ]);
       }
 
@@ -177,8 +178,8 @@ export const exportToExcel = async (
         phase,
         `TOTAL ${phase} DAYS :`,
         "", "", "", 
-        phaseTotalsMap[phase].str,
-        phaseTotalsMap[phase].minsStr,
+        phaseTotalsMap[phase]?.str || "0 Days",
+        phaseTotalsMap[phase]?.minsStr || "0 Mins",
         "", "", "", "", ""
       ]);
 
@@ -287,7 +288,7 @@ export const exportToExcel = async (
     
     // TASK: APPLY STYLES & UPLOAD - Generate Base64
     const excelBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-    const filename = `OM_DEDY_Timeline_${projectName.replace(/\s+/g, '_')}.xlsx`;
+    const filename = `OM_DEDY_Timeline_${projectName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.xlsx`;
 
     const response = await fetch(`${backendUrl}/api/m365/upload-excel`, {
       method: 'POST',

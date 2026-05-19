@@ -7472,16 +7472,13 @@ function GanttDetailView({
     return { roots, map };
   }, [filteredTasks, isGlobalView, projects, tasks]);
 
-  const exportToExcelAction = async () => {
-    if (!currentProject) return;
+  const exportToExcelAction = async (proj: any, roots: any[]) => {
+    if (!proj) return;
     
     // TASK: FIX REACT STALE CLOSURE
-    // Fetching the most up-to-date project and tasks could be done here if needed,
-    // but ensuring projectTree.roots is fresh from the latest render is usually enough in React.
-    // We will use the values from the current render cycle which are guaranteed to be fresh 
-    // due to how App.tsx is structured with useMemo for projectTree.
+    // Use the values passed directly from the click handler
     
-    const url = await exportToExcel(currentProject, projectTree.roots, setIsExcelLoading);
+    const url = await exportToExcel(proj, roots, setIsExcelLoading);
     if (url) {
       setExcelUrl(url);
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -7681,17 +7678,13 @@ function GanttDetailView({
                              {user && (
                                <button 
                                  onClick={() => {
-                                   if (excelUrl) {
-                                     window.open(excelUrl, '_blank', 'noopener,noreferrer');
-                                   } else {
-                                     exportToExcelAction();
-                                   }
+                                   exportToExcelAction(currentProject, projectTree.roots);
                                  }} 
                                  disabled={isExcelLoading} 
                                  className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50"
                                >
                                  {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
-                                 <span>{isExcelLoading ? "Menarik data komentar lama & Menyusun Layout..." : "Buka & Edit di Excel Online"}</span>
+                                 <span>{isExcelLoading ? "Mengeksport File Baru..." : "Buka & Edit di Excel Online"}</span>
                                </button>
                              )}
                            </div>
