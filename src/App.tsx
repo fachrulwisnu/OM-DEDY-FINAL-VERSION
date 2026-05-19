@@ -7686,7 +7686,7 @@ function GanttDetailView({
                                  className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50"
                                >
                                  {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
-                                 <span>{isExcelLoading ? "Memproteksi Komentar & Mengeksport..." : "Buka & Edit di Excel Online"}</span>
+                                 <span>{isExcelLoading ? "Menarik data komentar lama & Menyusun Layout..." : "Buka & Edit di Excel Online"}</span>
                                </button>
                              )}
                            </div>
