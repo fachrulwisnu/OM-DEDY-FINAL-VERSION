@@ -7104,61 +7104,46 @@ function GanttDetailView({
 
   const [activeView, setActiveView] = useState<'INFRASTRUCTURE' | 'SYSTEM_LOG' | 'HISTORY_EDIT'>('INFRASTRUCTURE');
   const [isExcelLoading, setIsExcelLoading] = useState(false);
+  const [isSyncingFeedback, setIsSyncingFeedback] = useState(false);
   const [rescheduleLogs, setRescheduleLogs] = useState<ProjectRescheduleLog[]>([]);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   
   const currentProject = useMemo(() => (projects || []).find((p: any) => p.id === projectId), [projects, projectId]);
 
-  // SMART AUTO-SYNC: Sync feedback on window focus
-  useEffect(() => {
-    const performSilentSync = async () => {
-      if (!currentProject || !currentProject.project_name) {
-        console.log("[M365 Sync] Skip sync: Project metadata not ready yet.");
-        return;
-      }
+  const handleManualSync = async () => {
+    if (!currentProject || !currentProject.project_name) {
+      alert("Project metadata not ready.");
+      return;
+    }
+    
+    try {
+      setIsSyncingFeedback(true);
+      const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
       
-      try {
-        console.log("[M365 Sync] Sending background request to sync feedback for:", currentProject.project_name);
-        const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-        
-        const response = await fetch(`${backendUrl}/api/m365/sync-feedback`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectName: currentProject.project_name })
-        });
+      const response = await fetch(`${backendUrl}/api/m365/sync-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectName: currentProject.project_name })
+      });
 
-        const result = await response.json();
-        console.log("[M365 Sync] Backend Response Received:", result);
-
-        if (result.success) {
-          console.log("[M365 Sync] Sync successful! Triggering UI Re-fetch...");
-          
-          // CRITICAL FIX: Automatically invoke the actual function that reloads the data from the DB to the UI
-          if (typeof fetchProjectData === 'function') {
-            fetchProjectData(); 
-          } else {
-            // Fallback to refreshKey if fetchData isn't provided
-            setRefreshKey((prev: number) => prev + 1);
-          }
+      const result = await response.json();
+      if (result.success) {
+        if (typeof fetchProjectData === 'function') {
+          fetchProjectData(); 
+        } else {
+          setRefreshKey((prev: number) => prev + 1);
         }
-      } catch (error) {
-        console.error("[M365 Sync] Silent sync failed:", error);
+        onNotif?.("Feedback Synced Successfully!");
+      } else {
+        alert("Failed to sync feedback: " + (result.message || "Unknown error"));
       }
-    };
-
-    const onFocus = () => {
-      console.log("[M365 Sync] Tab focus detected! Checking for updates...");
-      performSilentSync();
-    };
-
-    // Bind the event listener to the browser window
-    window.addEventListener('focus', onFocus);
-
-    // Clean up listener on component unmount
-    return () => {
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [currentProject?.id, currentProject?.project_name, fetchProjectData, setRefreshKey]);
+    } catch (error) {
+      console.error("[M365 Sync] Sync failed:", error);
+      alert("Network error while syncing feedback.");
+    } finally {
+      setIsSyncingFeedback(false);
+    }
+  };
 
   // DERIVE PROJECT SPECIFIC AUDIT LOGS
   const systemLogs = useMemo(() => {
@@ -7720,10 +7705,20 @@ function GanttDetailView({
                                </button>
                              )}
                              {user && (
-                               <button onClick={exportToExcelAction} disabled={isExcelLoading} className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50">
-                                 {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
-                                 <span>{isExcelLoading ? "Menghubungkan ke M365..." : "Buka & Edit di Excel Online"}</span>
-                               </button>
+                               <div className="flex items-center gap-2">
+                                 <button 
+                                   onClick={handleManualSync} 
+                                   disabled={isSyncingFeedback}
+                                   className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold text-[10px] uppercase tracking-wider px-4 py-3 rounded-lg shadow-md transition-all outline-none border border-green-500/20 disabled:opacity-50"
+                                 >
+                                   {isSyncingFeedback ? <span className="animate-spin text-white">⌛</span> : <span>🔄</span>}
+                                   <span>{isSyncingFeedback ? "Syncing..." : "Sync Feedback M365"}</span>
+                                 </button>
+                                 <button onClick={exportToExcelAction} disabled={isExcelLoading} className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50">
+                                   {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
+                                   <span>{isExcelLoading ? "Menghubungkan ke M365..." : "Buka & Edit di Excel Online"}</span>
+                                 </button>
+                               </div>
                              )}
                            </div>
                         </div>
