@@ -76,8 +76,7 @@ import {
   Database,
   FileText,
   Info,
-  GripVertical,
-  Loader2
+  GripVertical
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1885,7 +1884,6 @@ export default function App() {
     scale,
     revertCount,
     setRefreshKey,
-    fetchProjectData: fetchData,
     handleToggleExpand,
     handleUpdateTask,
     handleUpdateProject,
@@ -4980,208 +4978,197 @@ function PortfolioDashboard({
     return stats;
   }, [allTasks]);
 
-  const [isExporting, setIsExporting] = useState(false);
-  
-  const handleExportProjects = async () => {
-    try {
-      setIsExporting(true);
-      // 1. New Clean Date Formatter Utility
-      const formatDate = (dateStr: any) => {
-        if (!dateStr || dateStr === '-') return '-';
-        try {
-          const date = new Date(dateStr);
-          if (isNaN(date.getTime())) return dateStr;
-          const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-          return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
-        } catch (e) {
-          return dateStr;
+  const handleExportProjects = () => {
+    // 1. New Clean Date Formatter Utility
+    const formatDate = (dateStr: any) => {
+      if (!dateStr || dateStr === '-') return '-';
+      try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return dateStr;
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+      } catch (e) {
+        return dateStr;
+      }
+    };
+
+    // 2. Man Days Formatter (9 Hours = 1 Day)
+    const formatManDays = (totalHours: number) => {
+      if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
+      const days = Math.floor(totalHours / 9); 
+      const hours = Math.floor(totalHours % 9);
+      const mins = Math.round((totalHours % 1) * 60);
+      return `${days} Days, ${hours} Hours, ${mins} Mins`;
+    };
+
+    const wb = XLSX.utils.book_new();
+
+    safeProjects.forEach(project => {
+      let fsdHours = 0, devHours = 0, sitHours = 0;
+      const p = project as any;
+      const phases = p.tasks || p.breakdowns || p.phases || p.l1_tasks || [];
+
+      // First Pass: Calculate Total Hours from L2 ONLY to prevent double counting
+      phases.forEach((phase: any) => {
+        const phaseName = (phase.title || phase.name || '').toUpperCase();
+        const tasks = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [];
+        tasks.forEach((task: any) => {
+          const hours = parseFloat(task.man_hours || task.hours) || 0;
+          if (phaseName.includes('FSD')) fsdHours += hours;
+          else if (phaseName.includes('DEV')) devHours += hours;
+          else if (phaseName.includes('SIT')) sitHours += hours;
+        });
+      });
+
+      const trueTotalHours = fsdHours + devHours + sitHours;
+
+      // 3. Build the ENTIRE Sheet as Array of Arrays (AOA)
+      const aoa: any[][] = [
+        [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], // Row 1 (Index 0)
+        [], // Row 2 (Index 1)
+        [`Project Name`, project.project_name || '-', ``, `Global Status`, project.status || 'TODO'], // Row 3 (Index 2)
+        [`Start Date`, formatDate(project.start_date), ``, `Total Man Hours`, `${trueTotalHours} Hours`], // Row 4 (FORMATTED)
+        [`End Date`, formatDate(project.end_date), ``, `PIC`, project.pic_name || (project as any).pic || '-'], // Row 5 (FORMATTED)
+        [], // Row 6 (Index 5)
+        [`Total Man days FSD:`, formatManDays(fsdHours)], // Row 7 (Index 6)
+        [`Total Man days DEV:`, formatManDays(devHours)], // Row 8 (Index 7)
+        [`Total Man days SIT:`, formatManDays(sitHours)], // Row 9 (Index 8)
+        [], // Row 10 (Index 9)
+        [ // Row 11 (Index 10): MAIN TABLE HEADERS (EXACT 13 FIELDS)
+          "Project Name", "Phase L1", "Task", "Type Task", "Components", 
+          "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
+          "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
+        ]
+      ];
+
+      const merges = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } } // Merge the main title across all 13 columns
+      ];
+
+      let currentRow = 11; // Data starts at Row 12 (0-indexed)
+
+      // 4. Second Pass: Build Data Rows & Merge Coordinates
+      phases.forEach((phase: any) => {
+        const tasks = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [{}];
+        const taskCount = tasks.length;
+        const startRow = currentRow; // Remember where this phase started
+
+        tasks.forEach((task: any) => {
+          const hours = parseFloat(task.man_hours || task.hours) || 0;
+          const mins = hours * 60;
+
+          aoa.push([
+            project.project_name || '-',
+            phase.title || phase.name || '-',
+            task.title || task.name || '-',
+            task.type_task || task.type || '-',
+            task.components || '-',
+            task.detail_breakdown || task.detail || '-',
+            hours ? `${hours} h` : '-',
+            mins ? `${mins} m` : '-',
+            formatDate(task.start_time || task.start_date), // Row Data Start Date (FORMATTED)
+            formatDate(task.end_time || task.end_date),   // Row Data End Date (FORMATTED)
+            task.status || 'TODO',
+            (task as any).fachrul_feedback || '-',
+            (task as any).barra_feedback || '-'
+          ]);
+          currentRow++;
+        });
+
+        // Add Merge Coordinates for L1 and Project Name
+        if (taskCount > 1) {
+          // Note: s = start, e = end, r = row, c = col (0-indexed)
+          merges.push({ s: { r: startRow, c: 1 }, e: { r: startRow + taskCount - 1, c: 1 } }); // Phase L1 (Col B)
+          merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow + taskCount - 1, c: 0 } }); // Project Name (Col A)
         }
+      });
+
+      // 5. Generate Worksheet from AOA
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      // 6. Apply Merges & Strict Column Widths
+      ws['!merges'] = merges;
+      ws['!cols'] = [
+        { wch: 25 }, // A: Project Name
+        { wch: 15 }, // B: Phase L1
+        { wch: 45 }, // C: Task
+        { wch: 15 }, // D: Type Task
+        { wch: 25 }, // E: Components
+        { wch: 65 }, // F: Detail Breakdown
+        { wch: 12 }, // G: Man Hours
+        { wch: 22 }, // H: Man Hours (Mins)
+        { wch: 15 }, // I: Start Date
+        { wch: 15 }, // J: End Date
+        { wch: 15 }, // K: Status
+        { wch: 35 }, // L: Fachrul Feedback
+        { wch: 35 }  // M: Barra Feedback
+      ];
+
+      // Define Reuseable Borders
+      const borderDef = {
+        top: { style: "thin" as const, color: { rgb: "D9D9D9" } },
+        bottom: { style: "thin" as const, color: { rgb: "D9D9D9" } },
+        left: { style: "thin" as const, color: { rgb: "D9D9D9" } },
+        right: { style: "thin" as const, color: { rgb: "D9D9D9" } }
       };
 
-      // 2. Man Days Formatter (9 Hours = 1 Day)
-      const formatManDays = (totalHours: number) => {
-        if (!totalHours) return '0 Days, 0 Hours, 0 Mins';
-        const days = Math.floor(totalHours / 9); 
-        const hours = Math.floor(totalHours % 9);
-        const mins = Math.round((totalHours % 1) * 60);
-        return `${days} Days, ${hours} Hours, ${mins} Mins`;
-      };
-
-      const wb = XLSX.utils.book_new();
-
-      safeProjects.forEach(project => {
-        let fsdHours = 0, devHours = 0, sitHours = 0;
-        const p = project as any;
-        const phases = p.tasks || p.breakdowns || p.phases || p.l1_tasks || [];
-
-        // First Pass: Calculate Total Hours from L2 ONLY to prevent double counting
-        phases.forEach((phase: any) => {
-          const phaseName = (phase.title || phase.name || '').toUpperCase();
-          const tasks = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [];
-          tasks.forEach((task: any) => {
-            const hours = parseFloat(task.man_hours || task.hours) || 0;
-            if (phaseName.includes('FSD')) fsdHours += hours;
-            else if (phaseName.includes('DEV')) devHours += hours;
-            else if (phaseName.includes('SIT')) sitHours += hours;
-          });
-        });
-
-        const trueTotalHours = fsdHours + devHours + sitHours;
-
-        // 3. Build the ENTIRE Sheet as Array of Arrays (AOA)
-        const aoa: any[][] = [
-          [`OM DEDY - PROJECT TIMELINE & BREAKDOWN REPORT`], // Row 1 (Index 0)
-          [], // Row 2 (Index 1)
-          [`Project Name`, project.project_name || '-', ``, `Global Status`, project.status || 'TODO'], // Row 3 (Index 2)
-          [`Start Date`, formatDate(project.start_date), ``, `Total Man Hours`, `${trueTotalHours} Hours`], // Row 4 (FORMATTED)
-          [`End Date`, formatDate(project.end_date), ``, `PIC`, project.pic_name || (project as any).pic || '-'], // Row 5 (FORMATTED)
-          [], // Row 6 (Index 5)
-          [`Total Man days FSD:`, formatManDays(fsdHours)], // Row 7 (Index 6)
-          [`Total Man days DEV:`, formatManDays(devHours)], // Row 8 (Index 7)
-          [`Total Man days SIT:`, formatManDays(sitHours)], // Row 9 (Index 8)
-          [], // Row 10 (Index 9)
-          [ // Row 11 (Index 10): MAIN TABLE HEADERS (EXACT 13 FIELDS)
-            "Project Name", "Phase L1", "Task", "Type Task", "Components", 
-            "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
-            "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
-          ]
-        ];
-
-        const merges = [
-          { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } } // Merge the main title across all 13 columns
-        ];
-
-        let currentRow = 11; // Data starts at Row 12 (0-indexed)
-
-        // 4. Second Pass: Build Data Rows & Merge Coordinates
-        phases.forEach((phase: any) => {
-          const tasks = phase.tasks || phase.breakdowns || phase.children || phase.l2_tasks || [{}];
-          const taskCount = tasks.length;
-          const startRow = currentRow; // Remember where this phase started
-
-          tasks.forEach((task: any) => {
-            const hours = parseFloat(task.man_hours || task.hours) || 0;
-            const mins = hours * 60;
-
-            aoa.push([
-              project.project_name || '-',
-              phase.title || phase.name || '-',
-              task.title || task.name || '-',
-              task.type_task || task.type || '-',
-              task.components || '-',
-              task.detail_breakdown || task.detail || '-',
-              hours ? `${hours} h` : '-',
-              mins ? `${mins} m` : '-',
-              formatDate(task.start_time || task.start_date), // Row Data Start Date (FORMATTED)
-              formatDate(task.end_time || task.end_date),   // Row Data End Date (FORMATTED)
-              task.status || 'TODO',
-              (task as any).fachrul_feedback || '-',
-              (task as any).barra_feedback || '-'
-            ]);
-            currentRow++;
-          });
-
-          // Add Merge Coordinates for L1 and Project Name
-          if (taskCount > 1) {
-            // Note: s = start, e = end, r = row, c = col (0-indexed)
-            merges.push({ s: { r: startRow, c: 1 }, e: { r: startRow + taskCount - 1, c: 1 } }); // Phase L1 (Col B)
-            merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow + taskCount - 1, c: 0 } }); // Project Name (Col A)
-          }
-        });
-
-        // 5. Generate Worksheet from AOA
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-        // 6. Apply Merges & Strict Column Widths
-        ws['!merges'] = merges;
-        ws['!cols'] = [
-          { wch: 25 }, // A: Project Name
-          { wch: 15 }, // B: Phase L1
-          { wch: 45 }, // C: Task
-          { wch: 15 }, // D: Type Task
-          { wch: 25 }, // E: Components
-          { wch: 65 }, // F: Detail Breakdown
-          { wch: 12 }, // G: Man Hours
-          { wch: 22 }, // H: Man Hours (Mins)
-          { wch: 15 }, // I: Start Date
-          { wch: 15 }, // J: End Date
-          { wch: 15 }, // K: Status
-          { wch: 35 }, // L: Fachrul Feedback
-          { wch: 35 }  // M: Barra Feedback
-        ];
-
-        // Define Reuseable Borders
-        const borderDef = {
-          top: { style: "thin" as const, color: { rgb: "D9D9D9" } },
-          bottom: { style: "thin" as const, color: { rgb: "D9D9D9" } },
-          left: { style: "thin" as const, color: { rgb: "D9D9D9" } },
-          right: { style: "thin" as const, color: { rgb: "D9D9D9" } }
-        };
-
-        // 7. Inject Styles
-        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-        for (let R = range.s.r; R <= range.e.r; ++R) {
-          for (let C = range.s.c; C <= range.e.c; ++C) {
-            const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
-            if (!ws[cellRef]) continue;
-            //@ts-ignore
-            if (R === 0) { // Main Title
+      // 7. Inject Styles
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
+          if (!ws[cellRef]) continue;
+          //@ts-ignore
+          if (R === 0) { // Main Title
+            ws[cellRef].s = {
+              fill: { fgColor: { rgb: "1F4E78" } },
+              font: { name: "Arial", sz: 14, bold: true, color: { rgb: "FFFFFF" } },
+              alignment: { horizontal: "center", vertical: "center" }
+            };
+          } else if ((R >= 2 && R <= 4) || (R >= 6 && R <= 8)) { // Metadata
+            ws[cellRef].s = {
+              font: { name: "Arial", sz: 10, bold: C === 0 || C === 3 || C === 6 },
+              alignment: { vertical: "center" },
+              border: (R === 4 || R === 8) ? { bottom: { style: "thin", color: { rgb: "D9D9D9" } } } : undefined
+            };
+          } else if (R === 10) { // Table Headers
+            ws[cellRef].s = {
+              fill: { fgColor: { rgb: "2F5597" } },
+              font: { name: "Arial", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+              alignment: { horizontal: "center", vertical: "center", wrapText: true },
+              border: borderDef
+            };
+          } else if (R >= 11) { // Data Rows
+            if (C === 1 || C === 0) {
               ws[cellRef].s = {
-                fill: { fgColor: { rgb: "1F4E78" } },
-                font: { name: "Arial", sz: 14, bold: true, color: { rgb: "FFFFFF" } },
-                alignment: { horizontal: "center", vertical: "center" }
-              };
-            } else if ((R >= 2 && R <= 4) || (R >= 6 && R <= 8)) { // Metadata
-              ws[cellRef].s = {
-                font: { name: "Arial", sz: 10, bold: C === 0 || C === 3 || C === 6 },
-                alignment: { vertical: "center" },
-                border: (R === 4 || R === 8) ? { bottom: { style: "thin", color: { rgb: "D9D9D9" } } } : undefined
-              };
-            } else if (R === 10) { // Table Headers
-              ws[cellRef].s = {
-                fill: { fgColor: { rgb: "2F5597" } },
-                font: { name: "Arial", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+                fill: C === 1 ? { fgColor: { rgb: "F2F2F5" } } : undefined,
+                font: { name: "Arial", sz: 10, bold: C === 1 },
                 alignment: { horizontal: "center", vertical: "center", wrapText: true },
                 border: borderDef
               };
-            } else if (R >= 11) { // Data Rows
-              if (C === 1 || C === 0) {
-                ws[cellRef].s = {
-                  fill: C === 1 ? { fgColor: { rgb: "F2F2F5" } } : undefined,
-                  font: { name: "Arial", sz: 10, bold: C === 1 },
-                  alignment: { horizontal: "center", vertical: "center", wrapText: true },
-                  border: borderDef
-                };
-              } else if (C === 8 || C === 9 || C === 10) {
-                ws[cellRef].s = {
-                  font: { name: "Arial", sz: 10 },
-                  alignment: { horizontal: "center", vertical: "top", wrapText: true },
-                  border: borderDef
-                };
-              } else {
-                ws[cellRef].s = {
-                  font: { name: "Arial", sz: 10 },
-                  alignment: { vertical: "top", wrapText: true },
-                  border: borderDef
-                };
-              }
+            } else if (C === 8 || C === 9 || C === 10) {
+              ws[cellRef].s = {
+                font: { name: "Arial", sz: 10 },
+                alignment: { horizontal: "center", vertical: "top", wrapText: true },
+                border: borderDef
+              };
+            } else {
+              ws[cellRef].s = {
+                font: { name: "Arial", sz: 10 },
+                alignment: { vertical: "top", wrapText: true },
+                border: borderDef
+              };
             }
           }
         }
+      }
 
-        // 8. Save
-        const sheetName = (project.project_name || 'Project').substring(0, 31).replace(/[\[\]\?\*\\\/]/g, '');
-        XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Project');
-      });
+      // 8. Save
+      const sheetName = (project.project_name || 'Project').substring(0, 31).replace(/[\[\]\?\*\\\/]/g, '');
+      XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Project');
+    });
 
-      XLSX.writeFile(wb, `OM_DEDY_Timeline_${new Date().toISOString().split('T')[0]}.xlsx`);
-      setNotif("Portfolio Export Success!");
-    } catch (error) {
-      console.error("Export Error:", error);
-      alert("Export failed. Please check your data.");
-    } finally {
-      setIsExporting(false);
-    }
+    XLSX.writeFile(wb, `OM_DEDY_Timeline_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -5197,11 +5184,9 @@ function PortfolioDashboard({
           {user && (
             <button 
               onClick={handleExportProjects}
-              disabled={isExporting}
-              className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 border border-slate-200 dark:border-slate-700 transition-all active:scale-95 disabled:opacity-50"
+              className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 border border-slate-200 dark:border-slate-700 transition-all active:scale-95"
             >
-              {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-indigo-500" /> : <Download className="w-4 h-4" />}
-              {isExporting ? "Preserving Feedback & Exporting..." : "Export to Excel"}
+              <Download className="w-4 h-4" /> Export to Excel
             </button>
           )}
           {user && (
@@ -7100,7 +7085,7 @@ const ProjectRedirect = () => {
 
 function GanttDetailView({ 
   user, users, projectId: propsProjectId, setFocusedProjectId, projects, setProjects, tasks, hierarchicalTasks, expandedRows, scale, revertCount,
-  setRefreshKey, fetchProjectData, handleToggleExpand, handleUpdateTask, handleUpdateProject, handleOpenAudit, handleDeleteTask, 
+  setRefreshKey, handleToggleExpand, handleUpdateTask, handleUpdateProject, handleOpenAudit, handleDeleteTask, 
   setScale, setTasks, setIsEditWBSModalOpen, onReschedule, onNotif, auditLogs, historyEditLogs, isAdmin, isSuperadmin, isMobile, authLoading
 }: any) {
   const navigate = useNavigate();
@@ -7118,49 +7103,10 @@ function GanttDetailView({
 
   const [activeView, setActiveView] = useState<'INFRASTRUCTURE' | 'SYSTEM_LOG' | 'HISTORY_EDIT'>('INFRASTRUCTURE');
   const [isExcelLoading, setIsExcelLoading] = useState(false);
-  const [isSyncingFeedback, setIsSyncingFeedback] = useState(false);
   const [rescheduleLogs, setRescheduleLogs] = useState<ProjectRescheduleLog[]>([]);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   
   const currentProject = useMemo(() => (projects || []).find((p: any) => p.id === projectId), [projects, projectId]);
-
-  const handleManualSync = async () => {
-    if (!currentProject || !currentProject.project_name) {
-      alert("Project metadata not ready.");
-      return;
-    }
-    
-    try {
-      setIsSyncingFeedback(true);
-      const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-      
-      const response = await fetch(`${backendUrl}/api/m365/sync-feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          projectName: currentProject.project_name,
-          projectId: currentProject.id
-        })
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        if (typeof fetchProjectData === 'function') {
-          fetchProjectData(); 
-        } else {
-          setRefreshKey((prev: number) => prev + 1);
-        }
-        onNotif?.("Feedback Synced Successfully!");
-      } else {
-        alert("Failed to sync feedback: " + (result.message || "Unknown error"));
-      }
-    } catch (error) {
-      console.error("[M365 Sync] Sync failed:", error);
-      alert("Network error while syncing feedback.");
-    } finally {
-      setIsSyncingFeedback(false);
-    }
-  };
 
   // DERIVE PROJECT SPECIFIC AUDIT LOGS
   const systemLogs = useMemo(() => {
@@ -7722,20 +7668,10 @@ function GanttDetailView({
                                </button>
                              )}
                              {user && (
-                               <div className="flex items-center gap-2">
-                                 <button 
-                                   onClick={handleManualSync} 
-                                   disabled={isSyncingFeedback}
-                                   className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold text-[10px] uppercase tracking-wider px-4 py-3 rounded-lg shadow-md transition-all outline-none border border-green-500/20 disabled:opacity-50"
-                                 >
-                                   {isSyncingFeedback ? <span className="animate-spin text-white">⌛</span> : <span>🔄</span>}
-                                   <span>{isSyncingFeedback ? "Syncing..." : "Sync Feedback M365"}</span>
-                                 </button>
-                                 <button onClick={exportToExcelAction} disabled={isExcelLoading} className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50">
-                                   {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
-                                   <span>{isExcelLoading ? "Preserving Feedback & Exporting..." : "Buka & Edit di Excel Online"}</span>
-                                 </button>
-                               </div>
+                               <button onClick={exportToExcelAction} disabled={isExcelLoading} className="flex items-center gap-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-lg shadow-md transition-all outline-none border border-blue-500/20 disabled:opacity-50">
+                                 {isExcelLoading ? <span className="animate-spin text-white">⌛</span> : <span>📊</span>}
+                                 <span>{isExcelLoading ? "Menghubungkan ke M365..." : "Buka & Edit di Excel Online"}</span>
+                               </button>
                              )}
                            </div>
                         </div>

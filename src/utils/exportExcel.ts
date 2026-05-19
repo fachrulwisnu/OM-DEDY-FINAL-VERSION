@@ -271,16 +271,11 @@ export const exportToExcel = async (
 
   try {
     setIsExcelLoading(true);
-      const response = await fetch(`${backendUrl}/api/m365/upload-excel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          filename, 
-          excelBase64, 
-          projectId: project.id, 
-          projectName: project.project_name || project.name 
-        })
-      });
+    const response = await fetch(`${backendUrl}/api/m365/upload-excel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, excelBase64 })
+    });
 
     const result = await response.json();
     if (result.success && result.embedUrl) {
