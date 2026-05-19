@@ -18,11 +18,7 @@ export const exportToExcel = async (
   const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   try {
-    // 1. PRE-FETCH COMMENTS
     const projectName = project.project_name || project.name || 'Project';
-    const commentsRes = await fetch(`${backendUrl}/api/m365/get-comments?projectName=${encodeURIComponent(projectName)}`);
-    const existingComments = await commentsRes.json();
-    const commentsMap = existingComments?.comments || {};
 
     // 2. EXTRACT TASKS FROM HIERARCHICAL PHASES OR PROJECT
     let tasksToUse: any[] = [];
@@ -133,11 +129,7 @@ export const exportToExcel = async (
       if (phaseTasks.length > 0) {
         phaseTasks.forEach((task) => {
           const h = parseFloat(taskManHours(task)) || 0;
-          
-          // TASK: MERGE PRESERVED COMMENTS
           const taskTitle = task.title || task.name || "-";
-          const fachrulFb = commentsMap[taskTitle]?.fachrul || task.suggestion_fachrul || task.fachrul_feedback || "-";
-          const barraFb = commentsMap[taskTitle]?.barra || task.suggestion_barra || task.barra_feedback || "-";
 
           data.push([
             projectName,
@@ -151,8 +143,8 @@ export const exportToExcel = async (
             formatDate(task.start_time || task.start_date) || "-",
             formatDate(task.end_time || task.end_date) || "-",
             task.status || "TODO",
-            fachrulFb,
-            barraFb
+            "-", // Fachrul Feedback (Always Blank)
+            "-"  // Barra Feedback (Always Blank)
           ]);
         });
       } else {
