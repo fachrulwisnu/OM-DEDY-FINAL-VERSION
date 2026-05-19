@@ -128,34 +128,39 @@ export const exportToExcel = async (
         phaseTasks = tasksToUse.filter(t => t.phase === phase);
       }
       
-      if (phaseTasks.length === 0) return;
-
       const startRowIndex = data.length;
+      
+      if (phaseTasks.length > 0) {
+        phaseTasks.forEach((task) => {
+          const h = parseFloat(taskManHours(task)) || 0;
+          
+          // TASK: MERGE PRESERVED COMMENTS
+          const taskTitle = task.title || task.name || "-";
+          const fachrulFb = commentsMap[taskTitle]?.fachrul || task.suggestion_fachrul || task.fachrul_feedback || "-";
+          const barraFb = commentsMap[taskTitle]?.barra || task.suggestion_barra || task.barra_feedback || "-";
 
-      phaseTasks.forEach((task) => {
-        const h = parseFloat(taskManHours(task)) || 0;
-        
-        // TASK: MERGE PRESERVED COMMENTS
-        const taskTitle = task.title || task.name || "-";
-        const fachrulFb = commentsMap[taskTitle]?.fachrul || task.suggestion_fachrul || task.fachrul_feedback || "-";
-        const barraFb = commentsMap[taskTitle]?.barra || task.suggestion_barra || task.barra_feedback || "-";
-
+          data.push([
+            projectName,
+            phase,
+            taskTitle,
+            task.task_type || task.type || "-",
+            (Array.isArray(task.components) ? task.components.join(', ') : task.components) || "-",
+            task.detail_task || task.detail || "-",
+            h ? `${h} h` : "-",
+            h ? `${h * 60} m` : "-",
+            formatDate(task.start_time || task.start_date) || "-",
+            formatDate(task.end_time || task.end_date) || "-",
+            task.status || "TODO",
+            fachrulFb,
+            barraFb
+          ]);
+        });
+      } else {
+        // Placeholder for empty phase
         data.push([
-          projectName,
-          phase,
-          taskTitle,
-          task.task_type || task.type || "-",
-          (Array.isArray(task.components) ? task.components.join(', ') : task.components) || "-",
-          task.detail_task || task.detail || "-",
-          h ? `${h} h` : "-",
-          h ? `${h * 60} m` : "-",
-          formatDate(task.start_time || task.start_date) || "-",
-          formatDate(task.end_time || task.end_date) || "-",
-          task.status || "TODO",
-          fachrulFb,
-          barraFb
+          projectName, phase, "Belum ada task", "-", "-", "-", "-", "-", "-", "-", "TODO", "-", "-"
         ]);
-      });
+      }
 
       const endRowIndex = data.length - 1;
 

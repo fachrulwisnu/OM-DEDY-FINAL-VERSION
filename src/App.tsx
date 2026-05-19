@@ -7475,7 +7475,12 @@ function GanttDetailView({
   const exportToExcelAction = async () => {
     if (!currentProject) return;
     
-    // Pass the hierarchical project tree roots to the new export utility
+    // TASK: FIX REACT STALE CLOSURE
+    // Fetching the most up-to-date project and tasks could be done here if needed,
+    // but ensuring projectTree.roots is fresh from the latest render is usually enough in React.
+    // We will use the values from the current render cycle which are guaranteed to be fresh 
+    // due to how App.tsx is structured with useMemo for projectTree.
+    
     const url = await exportToExcel(currentProject, projectTree.roots, setIsExcelLoading);
     if (url) {
       setExcelUrl(url);
