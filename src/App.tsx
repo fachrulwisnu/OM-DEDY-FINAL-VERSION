@@ -7123,7 +7123,10 @@ function GanttDetailView({
       const response = await fetch(`${backendUrl}/api/m365/sync-feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName: currentProject.project_name })
+        body: JSON.stringify({ 
+          projectName: currentProject.project_name,
+          projectId: currentProject.id
+        })
       });
 
       const result = await response.json();
