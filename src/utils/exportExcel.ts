@@ -1,30 +1,62 @@
-import * as XLSX from 'xlsx-js-style';
+import * as XLSX from 'xlsx-js-style'; 
 
 /**
  * Enhanced export utility for Om Dedy Dashboard
- * Fully refactored to be dynamic based on L1 Phases
- * Restores corporate branding, metadata rows, and wrap-text layout
+ * Generates an EXACT layout using AOA and xlsx-js-style
+ * UPDATED: Calculate True Totals strictly from L1 PHASE inputs to respect SPARE time overrides
+ * UPDATED: Minute-based precision for Days calculation
  */
 export const exportToExcel = async (
-  project: any,
-  projectTreeRoots: any[],
+  project: any, 
+  hierarchicalPhases: any[],
   setIsExcelLoading: (loading: boolean) => void
 ) => {
-  if (!project || !project.tasks) return;
+  if (!project) return;
 
-  // 1. DYNAMICALLY EXTRACT UNIQUE PHASES FROM CURRENT TASK INPUTS
-  const phases = [...new Set(project.tasks.map((t: any) => t.phase).filter((p: any) => p && typeof p === 'string' && p.trim() !== ""))] as string[];
+  // 1. DYNAMICALLY EXTRACT UNIQUE PHASES FROM TASKS (FALLBACK TO HIERARCHICAL PHASES)
+  // We prefer hierarchicalPhases if provided, or extract from project tasks if they exist
+  let phases: string[] = [];
+  let tasksToUse: any[] = [];
+
+  if (hierarchicalPhases && hierarchicalPhases.length > 0) {
+    phases = hierarchicalPhases.map(p => (p.title || p.name || ''));
+    hierarchicalPhases.forEach(p => {
+      if (p.children) tasksToUse.push(...p.children);
+    });
+  } else if (project.tasks) {
+    tasksToUse = project.tasks;
+    phases = [...new Set(tasksToUse.map(t => t.phase).filter(p => p && p.trim() !== ""))];
+  }
+
+  const formatDate = (dateStr: any) => { 
+    if (!dateStr || dateStr === '-') return '-';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr; 
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+    } catch (e) { return dateStr; }
+  };
 
   // 2. PRE-CALCULATE DYNAMIC TOTALS FOR RINGKASAN AT THE TOP
   const phaseTotalsMap: Record<string, any> = {};
-  phases.forEach((phase: string) => {
-    const phaseTasks = project.tasks.filter((t: any) => t.phase === phase);
-    let totalMinutes = phaseTasks.reduce((sum: number, t: any) => sum + (parseInt(t.manHoursMinutes) || 0), 0);
+  phases.forEach(phase => {
+    const phaseTasks = tasksToUse.filter(t => (t.phase === phase || (hierarchicalPhases.find(hp => (hp.title || hp.name) === phase)?.children?.includes(t))));
+    let totalMinutes = phaseTasks.reduce((sum, t) => sum + (parseFloat(taskManHours(t)) * 60 || 0), 0);
+    
+    // Fallback search if phase empty
+    if (totalMinutes === 0 && hierarchicalPhases) {
+      const pNode = hierarchicalPhases.find(p => (p.title || p.name) === phase);
+      if (pNode && pNode.children) {
+        totalMinutes = pNode.children.reduce((sum: number, t: any) => sum + (parseFloat(taskManHours(t)) * 60 || 0), 0);
+      }
+    }
+
     let hoursFromMinutes = Math.floor(totalMinutes / 60);
-    let remainingMinutes = totalMinutes % 60;
+    let remainingMinutes = Math.round(totalMinutes % 60);
     let days = Math.floor(hoursFromMinutes / 8);
     let remainingHours = hoursFromMinutes % 8;
-
+    
     phaseTotalsMap[phase] = {
       str: `${days} Days, ${remainingHours} Hours, ${remainingMinutes} Mins`,
       minsStr: `${totalMinutes} Mins`,
@@ -32,18 +64,22 @@ export const exportToExcel = async (
     };
   });
 
+  function taskManHours(t: any) {
+    return t.man_hours || t.hours || t.manHours || "0";
+  }
+
   // 3. INITIALIZE TABLE MATRIX WITH STATIC AND DYNAMIC META INFO
   const data: any[][] = [
     ["OM DEDY - OPERATIONAL MONITORING DASHBOARD REPORT", "", "", "", "", "", "", "", "", "", "", "", ""],
     ["", "", "", "", "", "", "", "", "", "", "", "", ""],
     ["Project Name", project.project_name || project.name || "-", "", "Global Status", project.status || "TODO", "", "", "", "", "", "", "", ""],
-    ["Start Date", project.start_date || project.startDate || "-", "", "Total Man Hours", (project.total_man_hours || project.totalManHours) ? `${project.total_man_hours || project.totalManHours} Hours` : "0 Hours", "", "", "", "", "", "", "", ""],
-    ["End Date", project.end_date || project.endDate || "-", "", "PIC", project.pic_name || project.pic || "-", "", "", "", "", "", "", "", ""],
+    ["Start Date", formatDate(project.start_date || project.startDate) || "-", "", "Total Man Hours", project.total_man_hours || project.man_hours || project.totalManHours ? `${project.total_man_hours || project.man_hours || project.totalManHours} Hours` : "0 Hours", "", "", "", "", "", "", "", ""],
+    ["End Date", formatDate(project.end_date || project.endDate) || "-", "", "PIC", project.pic_name || project.pic || "-", "", "", "", "", "", "", "", ""],
     ["Project Type", project.project_type || project.projectType || "INTI", "", "", "", "", "", "", "", "", "", "", ""],
     ["", "", "", "", "", "", "", "", "", "", "", "", ""]
   ];
 
-  // Append Dynamic Ringkasan Rows (Point 2 & Dynamic L1 request)
+  // Append Dynamic Ringkasan Rows
   phases.forEach(phase => {
     data.push([`Total Days ${phase}:`, phaseTotalsMap[phase].str, "", "", "", "", "", "", "", "", "", "", ""]);
   });
@@ -53,8 +89,8 @@ export const exportToExcel = async (
   // Track exact index location of Table Header Row
   const headerRowIndex = data.length;
   data.push([
-    "Project Name", "Phase L1", "Task", "Type Task", "Components",
-    "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)",
+    "Project Name", "Phase L1", "Task", "Type Task", "Components", 
+    "Detail Breakdown", "Man Hours", "Man Hours (In Minutes)", 
     "Start Date", "End Date", "Status", "Fachrul Feedback", "Barra Feedback"
   ]);
 
@@ -62,32 +98,46 @@ export const exportToExcel = async (
   const merges: any[] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, // Title Header block
     { s: { r: 2, c: 1 }, e: { r: 2, c: 2 } }, // Project Name block
-    { s: { r: 3, c: 1 }, e: { r: 3, c: 2 } }, // Total Man Hours value cell alignment fix
+    { s: { r: 3, c: 1 }, e: { r: 3, c: 2 } }, // Total Man Hours value
     { s: { r: 4, c: 1 }, e: { r: 4, c: 2 } }  // PIC block
   ];
 
+  // Metadata merges for ringkasan rows
+  phases.forEach((_, idx) => {
+    const r = 7 + idx;
+    merges.push({ s: { r, c: 1 }, e: { r, c: 2 } });
+  });
+
   // 4. POPULATE DYNAMIC ROWS AND CALCULATE LOGICAL CELL SPANS
-  phases.forEach((phase: string) => {
-    const phaseTasks = project.tasks.filter((t: any) => t.phase === phase);
+  phases.forEach((phase) => {
+    let phaseTasks: any[] = [];
+    if (hierarchicalPhases && hierarchicalPhases.length > 0) {
+      const pNode = hierarchicalPhases.find(p => (p.title || p.name) === phase);
+      phaseTasks = pNode?.children || [];
+    } else {
+      phaseTasks = tasksToUse.filter(t => t.phase === phase);
+    }
+    
     if (phaseTasks.length === 0) return;
 
     const startRowIndex = data.length;
 
-    phaseTasks.forEach((task: any) => {
+    phaseTasks.forEach((task) => {
+      const h = parseFloat(taskManHours(task)) || 0;
       data.push([
         project.project_name || project.name || "-",
         phase,
-        task.title || "-",
+        task.title || task.name || "-",
         task.task_type || task.type || "-",
         (Array.isArray(task.components) ? task.components.join(', ') : task.components) || "-",
         task.detail_task || task.detail || "-",
-        (task.man_hours || task.manHours) ? `${task.man_hours || task.manHours} h` : "-",
-        task.manHoursMinutes ? `${task.manHoursMinutes} m` : "-",
-        task.start_time || task.startDate || "-",
-        task.end_time || task.endDate || "-",
+        h ? `${h} h` : "-",
+        h ? `${h * 60} m` : "-",
+        formatDate(task.start_time || task.start_date) || "-",
+        formatDate(task.end_time || task.end_date) || "-",
         task.status || "TODO",
-        task.suggestion_fachrul || task.fachrulFeedback || "-",
-        task.suggestion_barra || task.barraFeedback || "-"
+        task.suggestion_fachrul || task.fachrul_feedback || "-",
+        task.suggestion_barra || task.barra_feedback || "-"
       ]);
     });
 
@@ -99,13 +149,13 @@ export const exportToExcel = async (
       merges.push({ s: { r: startRowIndex, c: 1 }, e: { r: endRowIndex, c: 1 } });
     }
 
-    // Append Phase Total Row with proper field indexing matching
+    // Append Phase Total Row
     const totalRowIndex = data.length;
     data.push([
       project.project_name || project.name || "-",
       phase,
       `TOTAL ${phase} DAYS :`,
-      "", "", "",
+      "", "", "", 
       phaseTotalsMap[phase].str,
       phaseTotalsMap[phase].minsStr,
       "", "", "", "", ""
@@ -121,17 +171,16 @@ export const exportToExcel = async (
 
   // Establish Wide Layout Sizing Matrices
   ws['!cols'] = [
-    { wch: 25 }, { wch: 12 }, { wch: 38 }, { wch: 16 }, { wch: 15 },
-    { wch: 55 }, { wch: 25 }, { wch: 22 }, { wch: 15 }, { wch: 15 },
+    { wch: 25 }, { wch: 12 }, { wch: 38 }, { wch: 16 }, { wch: 15 }, 
+    { wch: 55 }, { wch: 25 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, 
     { wch: 12 }, { wch: 18 }, { wch: 18 }
   ];
 
-  ws['!rows'] = ws['!rows'] || [];
+  ws['!rows'] = [];
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
 
   // Deep loop to inject colors, layout alignment and wrap-text rules
   for (let R = range.s.r; R <= range.e.r; ++R) {
-    // Set row height logic
     if (R === 0) ws['!rows'][R] = { hpt: 35 };
     else if (R === headerRowIndex) ws['!rows'][R] = { hpt: 26 };
     else if (R > headerRowIndex) {
@@ -145,21 +194,19 @@ export const exportToExcel = async (
       const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
       if (!ws[cellRef]) continue;
 
-      // A. Main Report Banner Color Block (Warna Biru Tua)
       if (R === 0) {
         ws[cellRef].s = {
           font: { bold: true, name: "Arial", sz: 14, color: { rgb: "FFFFFF" } },
-          fill: { fgColor: { rgb: "1F4E78" } }, // Dark Corporate Blue
+          fill: { fgColor: { rgb: "1F4E78" } },
           alignment: { vertical: "center", horizontal: "left" }
         };
         continue;
       }
 
-      // B. Main Table Headers Color Block (Warna Biru Header)
       if (R === headerRowIndex) {
         ws[cellRef].s = {
           font: { bold: true, name: "Arial", sz: 10, color: { rgb: "FFFFFF" } },
-          fill: { fgColor: { rgb: "2F5597" } }, // Bright Corporate Blue Header
+          fill: { fgColor: { rgb: "2F5597" } },
           alignment: { vertical: "center", horizontal: "center", wrapText: true },
           border: {
             top: { style: "thin", color: { rgb: "000000" } },
@@ -171,7 +218,6 @@ export const exportToExcel = async (
         continue;
       }
 
-      // C. Metadata Rows Styling (Rows below title but above headers)
       if (R < headerRowIndex) {
         const isLabelCell = (C === 0 || C === 3);
         ws[cellRef].s = {
@@ -181,10 +227,8 @@ export const exportToExcel = async (
         continue;
       }
 
-      // D. Core Table Data Rows Styling (Rows below table headers)
       const currentCellCValue = String(data[R][2] || '');
       if (currentCellCValue.includes("TOTAL")) {
-        // Totals Styling
         ws[cellRef].s = {
           font: { bold: true, name: "Arial", sz: 10, color: { rgb: "000000" } },
           fill: { fgColor: { rgb: "F2F2F2" } },
@@ -197,14 +241,13 @@ export const exportToExcel = async (
           }
         };
       } else {
-        // Regular Task Styling with targetted Column WrapText (Point 3 & 4 Fix)
-        const shouldWrap = (C === 2 || C === 5); // Column C (Task) & Column F (Detail Breakdown)
+        const shouldWrap = (C === 2 || C === 5);
         ws[cellRef].s = {
           font: { name: "Arial", sz: 10 },
           alignment: { 
             vertical: "center", 
             horizontal: (C === 0 || C === 1 || C >= 6) ? "center" : "left",
-            wrapText: shouldWrap // FORCES EXCEL TEXT WRAPPING
+            wrapText: shouldWrap
           },
           border: {
             top: { style: "thin", color: { rgb: "E0E0E0" } },
@@ -217,13 +260,13 @@ export const exportToExcel = async (
     }
   }
 
-  // 6. BUILD FINAL WORKBOOK & POST TO SERVERLESS M365 GATEWAY
+  // 6. BUILD FINAL WORKBOOK & POST TO SERVER
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Timeline & Breakdown");
   
   const excelBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
   const filename = `OM_DEDY_Timeline_${project.project_name || project.name || 'Project'}_${Date.now()}.xlsx`;
-  const backendUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin;
+  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   try {
     setIsExcelLoading(true);
@@ -246,3 +289,4 @@ export const exportToExcel = async (
     setIsExcelLoading(false);
   }
 };
+
